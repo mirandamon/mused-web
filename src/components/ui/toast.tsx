@@ -56,7 +56,7 @@ const Toast = React.forwardRef<
       {/* Countdown Progress Bar */}
       <div
         className={cn(
-          "absolute bottom-0 left-0 h-1 w-full origin-left", // Base styles
+          "absolute bottom-0 left-0 h-[1px] w-full origin-left", // Adjusted height to h-[1px]
           "bg-primary", // Default color
           "group-[.destructive]:bg-destructive-foreground", // Color for destructive variant
           "animate-toast-countdown" // Apply the animation
