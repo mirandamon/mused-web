@@ -34,9 +34,8 @@ export default function SoundSelectionSheet({
   }, [currentPadSoundId, allSounds]);
 
   const handleSoundSelect = (sound: Sound) => {
-    // Don't close the sheet automatically, let the parent handle it if needed
     onSelectSound(sound);
-    // onOpenChange(false); // Let parent decide if sheet should close
+    onOpenChange(false); // Close the sheet after selection
   };
 
   // Filter sounds based on search term (simple implementation)
@@ -196,9 +195,10 @@ function SoundTile({ sound, onSelect, isSelected = false }: SoundTileProps) {
            ? "ring-2 ring-accent ring-offset-2 shadow-lg scale-[1.03]" // Style for selected tile
            : "hover:shadow-lg hover:scale-[1.03]", // Hover style for non-selected tile
          // Disable hover effect if it's the 'current selection' display tile
-         isSelected && 'pointer-events-none'
+         // Update: Allow clicking selected tile to re-select/confirm
+         // isSelected && 'pointer-events-none'
       )}
-      // Disable the button behavior if it's just for display
+      // Disable the button behavior if it's just for display (Current Selection tile)
       disabled={isSelected && onSelect === (() => {})} // Rough check if it's display only
     >
       {/* Subtle pattern overlay */}
