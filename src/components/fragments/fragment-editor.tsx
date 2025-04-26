@@ -156,9 +156,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                return updatedPads;
            });
            if (padStatusMessage) {
-               toast({
-                 title: padStatusMessage
-               });
+                // Wrap toast call in setTimeout to avoid state update during render
+                setTimeout(() => {
+                    toast({ title: padStatusMessage });
+                }, 0);
            }
       }
     }
@@ -221,7 +222,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
      // Show toast *after* the state update has been queued
      if (toastMessage) {
-       toast({ title: "Sound Updated", description: toastMessage });
+        // Wrap toast call in setTimeout to avoid state update during render
+        setTimeout(() => {
+          toast({ title: "Sound Updated", description: toastMessage });
+        }, 0);
      }
 
      // Note: Sheet closing is handled by the Sheet component itself via onOpenChange
@@ -241,21 +245,27 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   const handleRecordClick = () => {
     setIsRecording(!isRecording);
-     toast({
-      title: isRecording ? "Recording Stopped" : "Live Recording (Not Implemented)",
-      description: isRecording ? "Stopped live recording mode." : "Tap a pad to assign live audio (feature coming soon).",
-      variant: "default",
-    });
+     // Wrap toast call in setTimeout
+     setTimeout(() => {
+        toast({
+            title: isRecording ? "Recording Stopped" : "Live Recording (Not Implemented)",
+            description: isRecording ? "Stopped live recording mode." : "Tap a pad to assign live audio (feature coming soon).",
+            variant: "default",
+        });
+     }, 0);
   };
 
   const handleUploadClick = () => {
      setSelectedPadId(null);
      setCurrentSelectedPadData(null);
      setIsSoundSheetOpen(true);
-     toast({
-       title: "Select Sound",
-       description: "Opening sound library. Long press a pad first to assign sounds.",
-     });
+     // Wrap toast call in setTimeout
+     setTimeout(() => {
+        toast({
+          title: "Select Sound",
+          description: "Opening sound library. Long press a pad first to assign sounds.",
+        });
+     }, 0);
   }
 
    const handlePostFragment = async () => {
@@ -265,11 +275,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     // A fragment is postable if at least one pad is active *and* has sounds
     const hasSound = pads.some(p => p.isActive && p.sounds.length > 0);
     if (!hasSound) {
-        toast({
-            variant: "destructive",
-            title: "Empty Fragment",
-            description: "Add at least one sound to an active pad before posting.",
-        });
+        // Wrap toast call in setTimeout
+        setTimeout(() => {
+            toast({
+                variant: "destructive",
+                title: "Empty Fragment",
+                description: "Add at least one sound to an active pad before posting.",
+            });
+        }, 0);
         return;
     }
 
@@ -278,15 +291,18 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    toast({
-      title: "Fragment Posted!",
-      description: originalFragmentId ? `Your remix of ${originalAuthor}'s fragment is live.` : "Your new fragment is live.",
-      action: (
-         <Button variant="outline" size="sm" onClick={() => window.location.href = '/'}>
-            View Feed
-         </Button>
-      ),
-    });
+    // Wrap toast call in setTimeout
+    setTimeout(() => {
+        toast({
+          title: "Fragment Posted!",
+          description: originalFragmentId ? `Your remix of ${originalAuthor}'s fragment is live.` : "Your new fragment is live.",
+          action: (
+             <Button variant="outline" size="sm" onClick={() => window.location.href = '/'}>
+                View Feed
+             </Button>
+          ),
+        });
+    }, 0);
   };
 
   // --- Playback Logic ---
@@ -340,15 +356,21 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
-       toast({
-         title: "Playback Paused",
-       });
+       // Wrap toast call in setTimeout
+       setTimeout(() => {
+           toast({
+             title: "Playback Paused",
+           });
+       }, 0);
     } else {
       startPlayback();
-       toast({
-         title: "Playback Started",
-         description: `Playing at ${bpm} BPM`,
-       });
+       // Wrap toast call in setTimeout
+       setTimeout(() => {
+           toast({
+             title: "Playback Started",
+             description: `Playing at ${bpm} BPM`,
+           });
+       }, 0);
     }
   };
 
@@ -417,10 +439,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                      const sound = pad.sounds[0];
                      return (
                          <Tooltip>
-                            <TooltipTrigger className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
-                                {/* Consistent white text on colored background */}
-                                {sound.source === 'live' ? <Mic className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1"/> : <Music2 className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1" />}
-                                <span className="text-xs text-white/90 opacity-90 truncate w-full text-center">{sound.soundName}</span>
+                            {/* Add asChild prop and wrap children in a div */}
+                            <TooltipTrigger asChild className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
+                                <div> {/* Wrap content in a div */}
+                                    {/* Consistent white text on colored background */}
+                                    {sound.source === 'live' ? <Mic className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1"/> : <Music2 className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1" />}
+                                    <span className="text-xs text-white/90 opacity-90 truncate w-full text-center">{sound.soundName}</span>
+                                </div>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="bg-background text-foreground">
                                 <p>{sound.soundName}</p>
@@ -431,15 +456,18 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                  // Multiple Sounds: Show Layers icon and count
                  return (
                      <Tooltip>
-                        <TooltipTrigger className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
-                            <Layers className="w-1/2 h-1/2 text-white opacity-90 mb-1" />
-                            <span className="text-xs text-white opacity-90">{pad.sounds.length} Sounds</span>
-                            {/* Optional: Carousel Dots for multiple sounds indicator */}
-                            {/* <div className="flex space-x-1 mt-1">
-                                {pad.sounds.map((s, idx) => (
-                                <div key={idx} className={`w-1.5 h-1.5 rounded-full ${s.color.replace('bg-','border-').replace('-500','-300')} border opacity-80`}></div>
-                                ))}
-                            </div> */}
+                        {/* Add asChild prop and wrap children in a div */}
+                        <TooltipTrigger asChild className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
+                           <div> {/* Wrap content in a div */}
+                                <Layers className="w-1/2 h-1/2 text-white opacity-90 mb-1" />
+                                <span className="text-xs text-white opacity-90">{pad.sounds.length} Sounds</span>
+                                {/* Optional: Carousel Dots for multiple sounds indicator */}
+                                {/* <div className="flex space-x-1 mt-1">
+                                    {pad.sounds.map((s, idx) => (
+                                    <div key={idx} className={`w-1.5 h-1.5 rounded-full ${s.color.replace('bg-','border-').replace('-500','-300')} border opacity-80`}></div>
+                                    ))}
+                                </div> */}
+                           </div>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="bg-background text-foreground text-xs p-2 max-w-[150px]">
                             <ul className="list-none p-0 m-0 space-y-1">
