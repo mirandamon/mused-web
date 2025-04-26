@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Music2, Mic, Upload, Check, Play, Pause, Settings2, Layers } from 'lucide-react'; // Added Layers icon
+import { Music2, Mic, Upload, Check, Play, Pause, Settings2, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import SoundSelectionSheet from './sound-selection-sheet';
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { presetSounds, marketplaceSounds } from '@/lib/placeholder-sounds';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Import Tooltip components
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 
 // Define a palette of Tailwind background color classes
@@ -37,6 +37,7 @@ const defaultPads: Pad[] = Array.from({ length: 16 }, (_, i) => ({
   id: i,
   sounds: [], // Start with an empty array of sounds
   isActive: false, // Default to inactive
+  currentSoundIndex: 0, // Initialize index
 }));
 
 // Helper function to get a random color from the palette
@@ -66,6 +67,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const { toast } = useToast();
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartTimeRef = useRef<number>(0);
+  const touchStartXRef = useRef<number>(0); // For swipe detection
+  const currentSwipingPadIdRef = useRef<number | null>(null); // Track which pad is being swiped
+  const swipeHandledRef = useRef<boolean>(false); // Flag to prevent click after swipe
+
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
@@ -73,6 +78,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const LONG_PRESS_DURATION = 500; // milliseconds
+  const SWIPE_THRESHOLD = 40; // Minimum pixels moved horizontally to trigger swipe
 
    // Initialize pads and color map from initialPads prop
    useEffect(() => {
@@ -113,8 +119,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
             ...rawPad,
             sounds: processedSounds,
             // A pad is active if isActive is explicitly true OR it has sounds.
-            // This handles activating a pad just by adding a sound.
             isActive: rawPad.isActive || processedSounds.length > 0,
+            currentSoundIndex: rawPad.currentSoundIndex ?? 0, // Initialize index
         };
      });
 
@@ -125,50 +131,134 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   const handlePadMouseDown = (id: number) => {
      touchStartTimeRef.current = Date.now();
+     swipeHandledRef.current = false; // Reset swipe flag on new press
      longPressTimerRef.current = setTimeout(() => {
+      // Long press detected
+      swipeHandledRef.current = true; // Prevent click/swipe after long press ends
       setSelectedPadId(id);
-      // No need to set currentSelectedPadData here, useEffect will handle it
-      // const padData = pads.find(p => p.id === id) || null;
-      // setCurrentSelectedPadData(padData);
       setIsSoundSheetOpen(true);
       longPressTimerRef.current = null;
+      // Clear touch start refs to prevent accidental swipe/click after sheet opens
+      touchStartXRef.current = 0;
+      currentSwipingPadIdRef.current = null;
     }, LONG_PRESS_DURATION);
   };
 
    const handlePadMouseUp = (id: number) => {
     if (longPressTimerRef.current) {
+      // If timer is still running, it's a short press (potential click)
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
 
       const pressDuration = Date.now() - touchStartTimeRef.current;
-      if (pressDuration < LONG_PRESS_DURATION) {
+      // Check if it wasn't a swipe AND was shorter than long press duration
+      if (!swipeHandledRef.current && pressDuration < LONG_PRESS_DURATION) {
           // Short press action: Toggle pad active state
            setPads(currentPads => {
               const updatedPads = currentPads.map(pad => {
                  if (pad.id === id) {
-                     const newState = !pad.isActive;
-                     // Removed toast notification for activation/deactivation
+                     // Toggle only if it has sounds or is already active
+                     const newState = (pad.sounds.length > 0 || pad.isActive) ? !pad.isActive : false;
                      return { ...pad, isActive: newState };
                  }
                  return pad;
                });
                return updatedPads;
            });
-           // Removed toast call
       }
     }
-     touchStartTimeRef.current = 0; // Reset start time
+     // Reset timing and swipe flags regardless
+     touchStartTimeRef.current = 0;
+     // Don't reset swipeHandledRef here, let the next mousedown/touchstart do it
+     // swipeHandledRef.current = false;
   };
 
-   const handlePadTouchStart = (id: number) => handlePadMouseDown(id);
-   const handlePadTouchEnd = (id: number) => handlePadMouseUp(id);
+   const handlePadTouchStart = (id: number, event: React.TouchEvent<HTMLButtonElement>) => {
+      touchStartXRef.current = event.touches[0].clientX;
+      currentSwipingPadIdRef.current = id;
+      handlePadMouseDown(id); // Also trigger long press logic
+   };
+
+   const handlePadTouchEnd = (id: number, event: React.TouchEvent<HTMLButtonElement>) => {
+     if (longPressTimerRef.current) {
+       clearTimeout(longPressTimerRef.current); // Cancel long press if touch ends early
+       longPressTimerRef.current = null;
+     }
+
+     // If a swipe wasn't handled during touchMove, process potential click on touchEnd
+     if (!swipeHandledRef.current) {
+        const pressDuration = Date.now() - touchStartTimeRef.current;
+        if (pressDuration < LONG_PRESS_DURATION) {
+            // Short press action: Toggle pad active state
+             setPads(currentPads => {
+                const updatedPads = currentPads.map(pad => {
+                   if (pad.id === id) {
+                       const newState = (pad.sounds.length > 0 || pad.isActive) ? !pad.isActive : false;
+                       return { ...pad, isActive: newState };
+                   }
+                   return pad;
+                 });
+                 return updatedPads;
+             });
+        }
+     }
+
+     // Reset swipe and timing state
+     touchStartXRef.current = 0;
+     currentSwipingPadIdRef.current = null;
+     touchStartTimeRef.current = 0;
+     // Don't reset swipeHandledRef immediately, wait for next touch start
+   };
+
+
+   const handlePadTouchMove = (event: React.TouchEvent<HTMLButtonElement>) => {
+     if (!touchStartXRef.current || currentSwipingPadIdRef.current === null || swipeHandledRef.current) {
+       return; // No swipe started, wrong pad, or already handled
+     }
+
+     const currentX = event.touches[0].clientX;
+     const deltaX = currentX - touchStartXRef.current;
+     const padId = currentSwipingPadIdRef.current;
+
+     if (Math.abs(deltaX) > SWIPE_THRESHOLD) {
+       // Swipe detected
+       if (longPressTimerRef.current) {
+         clearTimeout(longPressTimerRef.current); // Cancel long press if swipe occurs
+         longPressTimerRef.current = null;
+       }
+       swipeHandledRef.current = true; // Mark swipe as handled
+
+       setPads(currentPads => {
+         return currentPads.map(pad => {
+           if (pad.id === padId && pad.sounds.length > 1) {
+             const direction = deltaX > 0 ? -1 : 1; // Swipe right = previous (-1), Swipe left = next (+1)
+             let newIndex = (pad.currentSoundIndex ?? 0) + direction;
+             // Loop back around
+             if (newIndex < 0) newIndex = pad.sounds.length - 1;
+             if (newIndex >= pad.sounds.length) newIndex = 0;
+
+             return { ...pad, currentSoundIndex: newIndex };
+           }
+           return pad;
+         });
+       });
+
+       // Reset touch start X to prevent multiple swipes from one drag
+       touchStartXRef.current = currentX;
+     }
+   };
+
 
   const handlePadMouseLeave = () => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+     // Reset swipe and timing state on mouse leave
+     touchStartXRef.current = 0;
+     currentSwipingPadIdRef.current = null;
      touchStartTimeRef.current = 0;
+     swipeHandledRef.current = false; // Reset swipe flag fully
   };
 
   // Handles selecting or deselecting a sound from the sheet
@@ -183,18 +273,23 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
          const soundIndex = pad.sounds.findIndex(s => s.soundId === sound.id);
          let newSounds: PadSound[];
+         let newCurrentIndex = pad.currentSoundIndex ?? 0;
 
          if (soundIndex > -1) {
            // Sound exists, remove it
            newSounds = pad.sounds.filter((_, index) => index !== soundIndex);
            toastMessage = `${sound.name} removed from Pad ${selectedPadId + 1}.`;
+           // Adjust currentSoundIndex if the removed sound was the last one or before the current one
+           if (newSounds.length === 0) {
+              newCurrentIndex = 0;
+           } else if (newCurrentIndex >= newSounds.length) {
+              newCurrentIndex = newSounds.length - 1;
+           }
          } else {
            // Sound doesn't exist, add it
            let assignedColor = soundColorMap[sound.id];
            if (!assignedColor) {
              assignedColor = getRandomColor(availableColorsRef.current);
-             // Update color map in a separate effect or via a direct state update if needed immediately
-             // For now, we assume the color map update happens correctly outside this scope or is handled later
              setSoundColorMap(prevMap => ({ ...prevMap, [sound.id]: assignedColor! }));
            }
            const newPadSound: PadSound = {
@@ -205,24 +300,24 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              color: assignedColor!,
            };
            newSounds = [...pad.sounds, newPadSound];
+           newCurrentIndex = newSounds.length - 1; // Focus the newly added sound
            toastMessage = `${sound.name} added to Pad ${selectedPadId + 1}.`;
          }
 
          // Return the updated pad state
-         return { ...pad, sounds: newSounds, isActive: newSounds.length > 0 ? true : pad.isActive };
+         return { ...pad, sounds: newSounds, isActive: newSounds.length > 0, currentSoundIndex: newCurrentIndex };
        });
        return updatedPads; // Return the full updated pads array
      });
 
      // Show toast *after* the state update has been queued
      if (toastMessage) {
-        // Wrap toast call in setTimeout to avoid state update during render
         setTimeout(() => {
           toast({ title: "Sound Updated", description: toastMessage });
         }, 0);
      }
 
-     // Do NOT close sheet automatically after toggling a sound
+     // Keep the sheet open for potential multiple changes
      // setIsSoundSheetOpen(false);
    };
 
@@ -239,7 +334,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   const handleRecordClick = () => {
     setIsRecording(!isRecording);
-     // Wrap toast call in setTimeout
      setTimeout(() => {
         toast({
             title: isRecording ? "Recording Stopped" : "Live Recording (Not Implemented)",
@@ -250,10 +344,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   };
 
   const handleUploadClick = () => {
-     setSelectedPadId(null); // Clear selected pad before opening for generic sound browsing
+     setSelectedPadId(null);
      setCurrentSelectedPadData(null);
      setIsSoundSheetOpen(true);
-     // Wrap toast call in setTimeout
      setTimeout(() => {
         toast({
           title: "Select Sound",
@@ -266,10 +359,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     if (isPlaying) {
         handlePlayPause();
     }
-    // A fragment is postable if at least one pad is active *and* has sounds
     const hasSound = pads.some(p => p.isActive && p.sounds.length > 0);
     if (!hasSound) {
-        // Wrap toast call in setTimeout
         setTimeout(() => {
             toast({
                 variant: "destructive",
@@ -282,10 +373,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
     console.log("Posting Fragment:", { pads, bpm, originalAuthor, originalFragmentId });
 
-    // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Wrap toast call in setTimeout
     setTimeout(() => {
         toast({
           title: "Fragment Posted!",
@@ -324,23 +413,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop through 0-15
         const padToPlay = pads[nextBeat];
 
-        // If pad is active and has sounds, play them (requires audio implementation)
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
              console.log(`Beat: ${nextBeat}, Playing Sounds: ${padToPlay.sounds.map(s => s.soundName).join(', ')}`);
-             // --- Placeholder for actual audio playback ---
-             // You would likely use Web Audio API or a library like Howler.js here
              padToPlay.sounds.forEach(sound => {
                  if (sound.soundUrl) {
-                     // Example: using Audio object (simple, but limited)
-                     // const audio = new Audio(sound.soundUrl);
-                     // audio.play().catch(e => console.error("Error playing sound:", e));
-                     // Note: Repeatedly creating Audio objects might not be efficient
+                     // Actual audio playback needed here
                  }
              });
-             // --- End Placeholder ---
-        } else {
-           // Optional: Log inactive beats or do nothing
-           // console.log(`Beat: ${nextBeat}, Inactive or No Sound`);
         }
         return nextBeat; // Update the current beat for the next interval
       });
@@ -350,7 +429,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
-       // Wrap toast call in setTimeout
        setTimeout(() => {
            toast({
              title: "Playback Paused",
@@ -358,7 +436,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        }, 0);
     } else {
       startPlayback();
-       // Wrap toast call in setTimeout
        setTimeout(() => {
            toast({
              title: "Playback Started",
@@ -370,109 +447,116 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   const handleBpmChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newBpm = parseInt(event.target.value, 10);
-    if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) { // Set reasonable BPM limits
+    if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) {
       setBpm(newBpm);
     } else if (event.target.value === '') {
-       setBpm(120); // Reset to default if input is cleared
+       setBpm(120);
     }
-    // If currently playing, the interval will update automatically due to useEffect dependency
   };
 
-  // Effect to manage playback interval cleanup and updates
   useEffect(() => {
-    // If playing, ensure the interval reflects the current state (BPM, pads)
     if (isPlaying) {
-      startPlayback(); // This will clear the old interval and start a new one
+      startPlayback();
     } else {
-       stopPlayback(); // Ensure stopped if isPlaying becomes false
+       stopPlayback();
     }
-    // Cleanup function to stop playback when the component unmounts or dependencies change significantly
     return stopPlayback;
-  }, [isPlaying, bpm, startPlayback, stopPlayback]); // Added startPlayback and stopPlayback to dependencies
+  }, [isPlaying, bpm, startPlayback, stopPlayback]);
 
    const handleSheetOpenChange = (open: boolean) => {
      setIsSoundSheetOpen(open);
      if (!open) {
-       setSelectedPadId(null); // Reset selected pad when sheet closes
-       // setCurrentSelectedPadData(null); // Let the useEffect handle this
+       setSelectedPadId(null);
      }
    };
 
 
   return (
-    <TooltipProvider> {/* Wrap with TooltipProvider */}
+    <TooltipProvider>
       <Card className="w-full max-w-md shadow-lg">
         <CardContent className="p-4 md:p-6">
           <div className="grid grid-cols-4 gap-2 md:gap-3 aspect-square mb-6">
-            {pads.map((pad, index) => {
+            {pads.map((pad) => {
               const isPadActive = pad.isActive && pad.sounds.length > 0;
-              // Determine background: If multiple sounds, use a gradient or neutral? Let's use neutral for now.
-              // If one sound, use its color. If inactive or no sounds, use secondary.
-              const bgColorClass = isPadActive
-                ? pad.sounds.length === 1
-                    ? pad.sounds[0].color // Use the color of the single sound
-                    : 'bg-gradient-to-br from-muted to-secondary' // Gradient/Neutral for multiple sounds
-                : pad.isActive ? 'bg-secondary/70' : 'bg-secondary'; // Dimmer for active but no sound, normal secondary for inactive
+              const currentSoundIndex = pad.currentSoundIndex ?? 0;
+              const currentSound = pad.sounds[currentSoundIndex];
+
+              // Determine background color based on the *currently selected* sound in multi-sound pads
+              const bgColorClass = isPadActive && currentSound
+                ? currentSound.color
+                : pad.isActive ? 'bg-secondary/70' : 'bg-secondary';
+
               const borderColorClass = isPadActive ? 'border-transparent' : 'border-border';
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
-              const row = Math.floor(index / 4);
-              const delay = `${row * 100}ms`; // Animation delay based on row
+              const row = Math.floor(pad.id / 4);
+              const delay = `${row * 100}ms`;
 
               // Determine content based on pad state
               const padContent = () => {
+                 // Dots Indicator for multiple sounds
+                 const dotsIndicator = pad.sounds.length > 1 && (
+                    <div className="absolute top-1.5 left-0 right-0 flex justify-center items-center space-x-1 pointer-events-none">
+                       {pad.sounds.map((s, idx) => (
+                         <div
+                           key={idx}
+                           className={cn(
+                              "rounded-full transition-all duration-200",
+                              idx === currentSoundIndex ? `w-1.5 h-1.5 opacity-100` : `w-1 h-1 opacity-50`,
+                              s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400') + ' border' // Use border color derived from sound color
+                           )}
+                           style={{
+                             backgroundColor: idx === currentSoundIndex ? 'white' : 'transparent', // Fill active dot
+                             // Add slight scale effect
+                             transform: idx === currentSoundIndex ? 'scale(1.2)' : 'scale(1)',
+                           }}
+                         />
+                       ))}
+                     </div>
+                 );
+
+
                  if (!pad.isActive) {
-                    // Inactive Pad: Subtle indicator
                     return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>;
                  }
                  if (pad.sounds.length === 0) {
-                     // Active, No Sound: Pulsing dot to indicate readiness
                      return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-primary/30 animate-pulse"></div></div>;
                  }
-                 if (pad.sounds.length === 1) {
-                     // Single Sound: Show icon and truncated name
-                     const sound = pad.sounds[0];
-                     return (
-                         <Tooltip>
-                            {/* Add asChild prop and wrap children in a div */}
-                            <TooltipTrigger asChild className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
-                                <div> {/* Wrap content in a div */}
-                                    {/* Consistent white text on colored background */}
-                                    {sound.source === 'live' ? <Mic className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1"/> : <Music2 className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1" />}
-                                    <span className="text-xs text-white/90 opacity-90 truncate w-full text-center">{sound.soundName}</span>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="bg-background text-foreground">
-                                <p>{sound.soundName}</p>
-                            </TooltipContent>
-                        </Tooltip>
-                     );
-                 }
-                 // Multiple Sounds: Show Layers icon and count
+
+                 // Always show the current sound (single or multi)
+                 const soundToDisplay = currentSound; // This will be the sound at currentSoundIndex
+                 if (!soundToDisplay) return null; // Should not happen if sounds array is not empty
+
+                 const soundIcon = soundToDisplay.source === 'live' ? Mic : Music2;
+                 const soundName = soundToDisplay.soundName;
+
+
                  return (
                      <Tooltip>
-                        {/* Add asChild prop and wrap children in a div */}
-                        <TooltipTrigger asChild className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
-                           <div> {/* Wrap content in a div */}
-                                <Layers className="w-1/2 h-1/2 text-white opacity-90 mb-1" />
-                                <span className="text-xs text-white opacity-90">{pad.sounds.length} Sounds</span>
-                                {/* Optional: Carousel Dots for multiple sounds indicator */}
-                                {/* <div className="flex space-x-1 mt-1">
-                                    {pad.sounds.map((s, idx) => (
-                                    <div key={idx} className={`w-1.5 h-1.5 rounded-full ${s.color.replace('bg-','border-').replace('-500','-300')} border opacity-80`}></div>
-                                    ))}
-                                </div> */}
-                           </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="bg-background text-foreground text-xs p-2 max-w-[150px]">
-                            <ul className="list-none p-0 m-0 space-y-1">
-                                {pad.sounds.map((s) => (
-                                    <li key={s.soundId} className="flex items-center">
-                                        <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
-                                        <span className="truncate">{s.soundName}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </TooltipContent>
+                         {/* Use div for TooltipTrigger when it's not interactive */}
+                         <TooltipTrigger asChild>
+                            <div // Changed from button to div
+                                className="absolute inset-0 flex flex-col items-center justify-center p-1 pt-4 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing" // Add grab cursor
+                            >
+                                {dotsIndicator} {/* Render dots above the icon/text */}
+                                {React.createElement(soundIcon, { className: "w-1/2 h-1/2 text-white/90 opacity-80 mb-1 mt-1 flex-shrink-0" })}
+                                <span className="text-xs text-white/90 opacity-90 truncate w-full text-center">{soundName}</span>
+                            </div>
+                         </TooltipTrigger>
+                         <TooltipContent side="top" className="bg-background text-foreground">
+                           {pad.sounds.length > 1 ? (
+                               <ul className="list-none p-0 m-0 space-y-1 max-w-[150px]">
+                                   {pad.sounds.map((s, idx) => (
+                                       <li key={s.soundId} className={cn("flex items-center", idx === currentSoundIndex ? "font-semibold" : "")}>
+                                           <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
+                                           <span className="truncate">{s.soundName}</span>
+                                       </li>
+                                   ))}
+                               </ul>
+                           ) : (
+                                <p>{soundName}</p>
+                           )}
+                           {pad.sounds.length > 1 && <p className="text-xs text-muted-foreground mt-1">Swipe to cycle</p>}
+                         </TooltipContent>
                      </Tooltip>
                  );
               };
@@ -483,21 +567,23 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   onMouseDown={() => handlePadMouseDown(pad.id)}
                   onMouseUp={() => handlePadMouseUp(pad.id)}
                   onMouseLeave={handlePadMouseLeave}
-                  onTouchStart={() => handlePadTouchStart(pad.id)}
-                  onTouchEnd={() => handlePadTouchEnd(pad.id)}
+                  onTouchStart={(e) => handlePadTouchStart(pad.id, e)}
+                  onTouchEnd={(e) => handlePadTouchEnd(pad.id, e)}
+                  onTouchMove={handlePadTouchMove} // Add touch move handler for swipe
                   className={cn(
                     "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95",
-                    bgColorClass, // Dynamic background based on state and sounds
+                    bgColorClass,
                     borderColorClass,
-                    isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50', // Style for active vs inactive pads
-                    selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '', // Highlight selected pad
-                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '', // Highlight playing beat
-                    "opacity-0 animate-wave-fall", // Apply animation
+                    isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
+                    selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
+                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '',
+                    "opacity-0 animate-wave-fall",
+                    "overflow-hidden" // Ensure content doesn't overflow during swipe/animation
                   )}
-                   style={{ animationDelay: delay }} // Stagger animation
-                  aria-label={`Pad ${pad.id + 1}. Status: ${pad.isActive ? (pad.sounds.length > 0 ? `${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}` : 'Active, no sound') : 'Inactive'}. Short press to toggle activity. Long press to change sound${pad.sounds.length > 1 ? 's' : ''}.`}
+                   style={{ animationDelay: delay }}
+                  aria-label={`Pad ${pad.id + 1}. Status: ${pad.isActive ? (pad.sounds.length > 0 ? `${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}` : 'Active, no sound') : 'Inactive'}. Short press to toggle activity. Long press to change sound${pad.sounds.length > 1 ? 's' : ''}. ${pad.sounds.length > 1 ? 'Swipe to cycle sounds.' : ''}`}
                 >
-                  {padContent()} {/* Render the appropriate content */}
+                  {padContent()}
                 </button>
               );
             })}
@@ -601,15 +687,12 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        <SoundSelectionSheet
          isOpen={isSoundSheetOpen}
          onOpenChange={handleSheetOpenChange}
-         onToggleSound={handleToggleSound} // Use the new handler
+         onToggleSound={handleToggleSound}
          selectedPadId={selectedPadId}
-         currentPadSounds={currentSelectedPadData?.sounds || []} // Pass the array of sounds
-         allSounds={allSounds} // Pass all available sounds
+         currentPadSounds={currentSelectedPadData?.sounds || []}
+         allSounds={allSounds}
        />
-     </TooltipProvider> // Close TooltipProvider
+     </TooltipProvider>
   );
 }
-
-
-
 

@@ -146,12 +146,13 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
            <div className="grid grid-cols-4 gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto">
              {fragment.pads.map(pad => {
                 const isPadActive = pad.isActive && pad.sounds.length > 0;
-                // Background: Use first sound's color, a gradient for multiple, or muted/inactive color
-                const bgColorClass = isPadActive
-                    ? pad.sounds.length === 1
-                        ? pad.sounds[0].color
-                        : 'bg-gradient-to-br from-muted to-secondary' // Neutral/gradient for multiple sounds
-                    : 'bg-muted/50'; // Inactive or no sound color
+                 // Use the first sound's color if available, otherwise a gradient/neutral for multiple, or muted.
+                 const firstSoundColor = pad.sounds[0]?.color;
+                 const bgColorClass = isPadActive
+                     ? pad.sounds.length === 1 && firstSoundColor
+                         ? firstSoundColor
+                         : 'bg-gradient-to-br from-muted to-secondary' // Neutral/gradient for multiple sounds or if first sound lacks color
+                     : 'bg-muted/50'; // Inactive or no sound color
                const isCurrentBeat = isPlaying && currentBeat === pad.id;
 
                return (
@@ -162,27 +163,29 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
                             "relative w-full h-full rounded transition-all duration-100",
                             bgColorClass,
                             isCurrentBeat ? 'ring-2 ring-offset-1 ring-accent scale-[1.08] shadow-md' : '', // Beat highlight
-                             // Add subtle indicator for multiple sounds
+                             // Add subtle indicator for multiple sounds using Layers icon
                              pad.sounds.length > 1 && "flex items-center justify-center"
                             )}
                         >
                              {/* Icon for multiple sounds */}
                             {pad.sounds.length > 1 && <Layers className="w-1/2 h-1/2 text-white/70 absolute" />}
                             {/* Optional: Dim the background slightly if > 1 sound to make Layers icon pop? */}
-                            {/* {pad.sounds.length > 1 && <div className="absolute inset-0 bg-black/10 rounded"></div>} */}
+                            {pad.sounds.length > 1 && <div className="absolute inset-0 bg-black/10 rounded"></div>}
                         </div>
                     </TooltipTrigger>
                      {/* Tooltip shows sound details */}
                      {isPadActive && (
-                        <TooltipContent side="top" className="bg-background text-foreground text-xs p-2">
+                        <TooltipContent side="top" className="bg-background text-foreground text-xs p-2 max-w-[150px]">
                             {pad.sounds.length === 1 ? (
+                                // Show single sound name
                                 <p>{pad.sounds[0].soundName}</p>
                             ) : (
+                                // List multiple sounds
                                 <ul className="list-none p-0 m-0 space-y-1">
                                 {pad.sounds.map((s) => (
                                     <li key={s.soundId} className="flex items-center">
-                                        <div className={`w-3 h-3 rounded-sm mr-2 ${s.color}`}></div>
-                                        {s.soundName}
+                                        <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
+                                        <span className="truncate">{s.soundName}</span>
                                     </li>
                                 ))}
                                 </ul>
@@ -248,3 +251,4 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
     </TooltipProvider> // Close TooltipProvider
   );
 }
+

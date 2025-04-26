@@ -29,14 +29,14 @@ const getSoundColor = (soundId: string): string => {
   return soundColorMap[soundId];
 };
 
-// Updated function to generate pads with potentially multiple sounds
+// Updated function to generate pads with potentially multiple sounds and currentSoundIndex
 const generatePads = (activeIndices: number[], soundMapping: { [index: number]: string | string[] }): Pad[] => {
   return Array.from({ length: 16 }, (_, i) => {
-    const isActive = activeIndices.includes(i);
+    const isActiveInitially = activeIndices.includes(i);
     const soundInput = soundMapping[i]; // Can be single ID or array of IDs
     const padSounds: PadSound[] = [];
 
-    if (isActive && soundInput) {
+    if (soundInput) { // Process sounds regardless of initial isActive status
       const soundIds = Array.isArray(soundInput) ? soundInput : [soundInput];
       soundIds.forEach(soundId => {
         const sound = allSounds.find(s => s.id === soundId);
@@ -53,13 +53,18 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
       });
     }
 
+    // A pad is active if explicitly in activeIndices *and* has sounds loaded
+    const isActive = isActiveInitially && padSounds.length > 0;
+
     return {
       id: i,
       sounds: padSounds,
-      isActive: isActive, // Pad is active if in activeIndices (even if sound lookup fails)
+      isActive: isActive,
+      currentSoundIndex: 0, // Default to the first sound
     };
   });
 };
+
 
 // --- Sound Mappings (Can now include arrays for multiple sounds) ---
 const frag1SoundMap = {
@@ -88,7 +93,7 @@ export const placeholderFragments: Fragment[] = [
     author: 'SynthWaveKid',
     authorAvatar: 'https://picsum.photos/seed/frag1/40/40',
     timestamp: new Date(Date.now() - 1000 * 60 * 5),
-    pads: generatePads([0, 2, 5, 7, 8, 10, 13, 15], frag1SoundMap),
+    pads: generatePads([0, 2, 5, 7, 8, 10, 13, 15], frag1SoundMap), // Active indices passed here
     likes: 12,
     comments: [
       { id: 'c1-1', author: 'BeatMaster', text: 'Nice groove!', timestamp: new Date(Date.now() - 1000 * 60 * 2) },
@@ -102,7 +107,7 @@ export const placeholderFragments: Fragment[] = [
     author: 'LoFiDreamer',
     authorAvatar: 'https://picsum.photos/seed/frag2/40/40',
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    pads: generatePads([1, 3, 4, 6, 9, 11, 12, 14], frag2SoundMap),
+    pads: generatePads([1, 3, 4, 6, 9, 11, 12, 14], frag2SoundMap), // Active indices
     likes: 45,
     comments: [
        { id: 'c2-1', author: 'ChillHopFan', text: 'So chill!', timestamp: new Date(Date.now() - 1000 * 60 * 30) },
@@ -115,7 +120,7 @@ export const placeholderFragments: Fragment[] = [
     author: 'RemixNinja',
     authorAvatar: 'https://picsum.photos/seed/frag3/40/40',
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 8),
-    pads: generatePads([0, 1, 2, 3, 5, 6, 9, 10, 13, 14], frag3SoundMap),
+    pads: generatePads([0, 1, 2, 3, 5, 6, 9, 10, 13, 14], frag3SoundMap), // Active indices
     likes: 8,
     comments: [],
     originalAuthor: 'SynthWaveKid',
@@ -128,7 +133,7 @@ export const placeholderFragments: Fragment[] = [
     author: 'AcousticSoul',
     authorAvatar: 'https://picsum.photos/seed/frag4/40/40',
     timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24),
-    pads: generatePads([4, 5, 6, 7], frag4SoundMap),
+    pads: generatePads([4, 5, 6, 7], frag4SoundMap), // Active indices
     likes: 22,
     comments: [
        { id: 'c4-1', author: 'ListenerX', text: 'Simple but effective', timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5) },

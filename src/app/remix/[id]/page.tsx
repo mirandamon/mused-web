@@ -33,7 +33,8 @@ export default function RemixFragmentPage() {
                   source: s.source,
                   color: s.color || '', // Ensure color exists (or handle default assignment)
               })) : [],
-              isActive: pad.isActive
+              isActive: pad.isActive,
+              currentSoundIndex: pad.currentSoundIndex ?? 0, // Ensure currentSoundIndex is initialized
           }))
       } : null;
 
@@ -43,10 +44,12 @@ export default function RemixFragmentPage() {
     };
 
     if (fragmentId) {
-      const timer = setTimeout(fetchFragment, 500);
+      // Simulate network delay for loading state
+      setLoading(true);
+      const timer = setTimeout(fetchFragment, 500); // Simulate 500ms loading
       return () => clearTimeout(timer);
     } else {
-       setLoading(false);
+       setLoading(false); // No fragmentId, stop loading
     }
   }, [fragmentId]);
 

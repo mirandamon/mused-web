@@ -15,6 +15,7 @@ export interface Pad {
   id: number;
   sounds: PadSound[]; // Array to hold multiple sounds
   isActive: boolean; // A pad is active if it has at least one sound and is toggled on
+  currentSoundIndex?: number; // Index of the sound currently displayed/focused in case of multiple sounds
   // Removed single sound properties: sound?, soundId?, soundUrl?, source?, color?
 }
 
@@ -48,3 +49,4 @@ export interface Sound {
   previewUrl?: string; // Optional URL for sound preview
   patternStyle?: string; // Optional class for background pattern/animation
 }
+
