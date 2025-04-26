@@ -136,6 +136,11 @@ export default {
               "0%": { transform: "scaleX(1)" },
               "100%": { transform: "scaleX(0)" },
             },
+             // Keyframes for grid square wave/fall animation
+            "wave-fall": {
+              "0%": { opacity: "0", transform: "translateY(-60%)" }, // Start further up
+              "100%": { opacity: "1", transform: "translateY(0%)" },
+            },
         },
         animation: {
           'accordion-down': 'accordion-down 0.2s ease-out',
@@ -148,6 +153,8 @@ export default {
            "gradient-xy-slow": 'gradient-xy 25s ease infinite', // Slower version
            // Animation for toast countdown (4 seconds duration)
            "toast-countdown": 'toast-countdown 4s linear forwards',
+           // Animation for grid square wave/fall
+           "wave-fall": "wave-fall 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards", // Added bounce easing
         }
       }
     },

@@ -301,11 +301,13 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
       <Card className="w-full max-w-md shadow-lg">
         <CardContent className="p-4 md:p-6">
           <div className="grid grid-cols-4 gap-2 md:gap-3 aspect-square mb-6">
-            {pads.map((pad) => {
+            {pads.map((pad, index) => {
               const assignedColor = pad.isActive && pad.soundId ? soundColorMap[pad.soundId] : null;
               const bgColorClass = assignedColor || 'bg-secondary'; // Fallback to secondary if no color
               const borderColorClass = assignedColor ? 'border-transparent' : 'border-border'; // Transparent border if colored
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
+              const row = Math.floor(index / 4); // Calculate row index (0-3)
+              const delay = `${row * 100}ms`; // Stagger animation based on row (100ms per row)
 
               return (
                 <button
@@ -322,9 +324,9 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
                     pad.isActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
                     isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '', // Highlight current beat
-                    "animate-in fade-in zoom-in-95" // Entry animation
+                    "opacity-0 animate-wave-fall", // Apply wave-fall animation and start as invisible
                   )}
-                  style={{ animationDelay: `${pad.id * 20}ms` }}
+                   style={{ animationDelay: delay }} // Apply calculated delay
                   aria-label={`Pad ${pad.id + 1} ${pad.isActive ? `Active with ${pad.sound}` : 'Inactive'}. Long press to change sound.`}
                 >
                   {pad.isActive && pad.sound && (
@@ -412,5 +414,3 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
      </>
   );
 }
-
-    
