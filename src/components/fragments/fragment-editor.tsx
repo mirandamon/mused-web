@@ -78,7 +78,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const LONG_PRESS_DURATION = 500; // milliseconds
-  const SWIPE_THRESHOLD = 40; // Minimum pixels moved horizontally to trigger swipe
+  const SWIPE_THRESHOLD = 30; // Reduced threshold for better sensitivity
 
    // Initialize pads and color map from initialPads prop
    useEffect(() => {
@@ -158,7 +158,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
               const updatedPads = currentPads.map(pad => {
                  if (pad.id === id) {
                      // Toggle only if it has sounds or is already active
-                     const newState = (pad.sounds.length > 0 || pad.isActive) ? !pad.isActive : false;
+                     // const newState = (pad.sounds.length > 0 || pad.isActive) ? !pad.isActive : false;
+                     // Let's always allow toggling isActive, visual state will handle display
+                     const newState = !pad.isActive;
                      return { ...pad, isActive: newState };
                  }
                  return pad;
@@ -175,11 +177,11 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
    const handlePadTouchStart = (id: number, event: React.TouchEvent<HTMLButtonElement>) => {
       touchStartXRef.current = event.touches[0].clientX;
-      currentSwipingPadIdRef.current = id;
+      currentSwipingPadIdRef.current = id; // Set the pad being touched
       handlePadMouseDown(id); // Also trigger long press logic
    };
 
-   const handlePadTouchEnd = (id: number, event: React.TouchEvent<HTMLButtonElement>) => {
+   const handlePadTouchEnd = (id: number) => {
      if (longPressTimerRef.current) {
        clearTimeout(longPressTimerRef.current); // Cancel long press if touch ends early
        longPressTimerRef.current = null;
@@ -193,7 +195,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              setPads(currentPads => {
                 const updatedPads = currentPads.map(pad => {
                    if (pad.id === id) {
-                       const newState = (pad.sounds.length > 0 || pad.isActive) ? !pad.isActive : false;
+                       // Always allow toggling isActive.
+                       const newState = !pad.isActive;
                        return { ...pad, isActive: newState };
                    }
                    return pad;
@@ -203,62 +206,73 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         }
      }
 
-     // Reset swipe and timing state
+     // Reset swipe and timing state AFTER checking for click
      touchStartXRef.current = 0;
      currentSwipingPadIdRef.current = null;
      touchStartTimeRef.current = 0;
-     // Don't reset swipeHandledRef immediately, wait for next touch start
+     // swipeHandledRef is reset on touchStart/mouseDown
    };
 
 
    const handlePadTouchMove = (event: React.TouchEvent<HTMLButtonElement>) => {
+     // Ensure we have a starting X and a target pad ID, and haven't already handled a swipe/longpress
      if (!touchStartXRef.current || currentSwipingPadIdRef.current === null || swipeHandledRef.current) {
-       return; // No swipe started, wrong pad, or already handled
+       return;
      }
 
      const currentX = event.touches[0].clientX;
      const deltaX = currentX - touchStartXRef.current;
-     const padId = currentSwipingPadIdRef.current;
+     const padId = currentSwipingPadIdRef.current; // ID of the pad where touch started
 
+     // Check if movement exceeds the threshold
      if (Math.abs(deltaX) > SWIPE_THRESHOLD) {
-       // Swipe detected
+       // Swipe detected!
        if (longPressTimerRef.current) {
-         clearTimeout(longPressTimerRef.current); // Cancel long press if swipe occurs
+         clearTimeout(longPressTimerRef.current); // Cancel long press timer if swipe starts
          longPressTimerRef.current = null;
        }
-       swipeHandledRef.current = true; // Mark swipe as handled
+       swipeHandledRef.current = true; // Mark swipe as handled for this touch sequence
 
        setPads(currentPads => {
          return currentPads.map(pad => {
            if (pad.id === padId && pad.sounds.length > 1) {
-             const direction = deltaX > 0 ? -1 : 1; // Swipe right = previous (-1), Swipe left = next (+1)
+             // Determine direction: positive deltaX = swipe right (previous sound), negative = swipe left (next sound)
+             const direction = deltaX > 0 ? -1 : 1;
              let newIndex = (pad.currentSoundIndex ?? 0) + direction;
-             // Loop back around
-             if (newIndex < 0) newIndex = pad.sounds.length - 1;
-             if (newIndex >= pad.sounds.length) newIndex = 0;
 
+             // Handle wrap-around
+             if (newIndex < 0) {
+               newIndex = pad.sounds.length - 1;
+             } else if (newIndex >= pad.sounds.length) {
+               newIndex = 0;
+             }
+             console.log(`Swipe detected on Pad ${padId}. Direction: ${direction > 0 ? 'Right (Prev)' : 'Left (Next)'}. New Index: ${newIndex}`);
              return { ...pad, currentSoundIndex: newIndex };
            }
-           return pad;
+           return pad; // Return unchanged pad if it's not the one being swiped or has <= 1 sound
          });
        });
 
-       // Reset touch start X to prevent multiple swipes from one drag
+       // Reset the starting X coordinate for the *next* potential swipe within the same touch drag
+       // This allows continuous swiping left/right without lifting the finger
        touchStartXRef.current = currentX;
      }
    };
 
 
-  const handlePadMouseLeave = () => {
-    if (longPressTimerRef.current) {
+  const handlePadMouseLeave = (id: number) => {
+    // If mouse leaves the pad, cancel potential long press and reset swipe state for THIS pad
+    if (longPressTimerRef.current && currentSwipingPadIdRef.current === id) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
-     // Reset swipe and timing state on mouse leave
-     touchStartXRef.current = 0;
-     currentSwipingPadIdRef.current = null;
-     touchStartTimeRef.current = 0;
-     swipeHandledRef.current = false; // Reset swipe flag fully
+     // Reset swipe state only if leaving the pad that touch started on
+    if(currentSwipingPadIdRef.current === id) {
+        touchStartXRef.current = 0;
+        currentSwipingPadIdRef.current = null;
+        touchStartTimeRef.current = 0;
+        swipeHandledRef.current = false; // Reset swipe flag fully when leaving pad
+    }
   };
 
   // Handles selecting or deselecting a sound from the sheet
@@ -305,7 +319,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
          }
 
          // Return the updated pad state
-         return { ...pad, sounds: newSounds, isActive: newSounds.length > 0, currentSoundIndex: newCurrentIndex };
+         // Activate pad if adding first sound, keep active unless removing last sound
+         const newIsActive = newSounds.length > 0;
+         return { ...pad, sounds: newSounds, isActive: newIsActive, currentSoundIndex: newCurrentIndex };
        });
        return updatedPads; // Return the full updated pads array
      });
@@ -318,7 +334,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      }
 
      // Keep the sheet open for potential multiple changes
-     // setIsSoundSheetOpen(false);
+     // setIsSoundSheetOpen(false); // Keep sheet open
    };
 
    // Update currentSelectedPadData whenever selectedPadId or pads change
@@ -344,15 +360,21 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   };
 
   const handleUploadClick = () => {
-     setSelectedPadId(null);
-     setCurrentSelectedPadData(null);
+     // User clicks "Sounds" button - intended to OPEN the sheet, not necessarily assign.
+     // Don't require a pad to be selected first.
+     // setSelectedPadId(null); // Keep selectedPadId if already long-pressed
+     // setCurrentSelectedPadData(null);
      setIsSoundSheetOpen(true);
-     setTimeout(() => {
-        toast({
-          title: "Select Sound",
-          description: "Opening sound library. Long press a pad first to assign sounds.",
-        });
-     }, 0);
+     // Toast if no pad is selected via long-press yet
+     if (selectedPadId === null) {
+         setTimeout(() => {
+            toast({
+              title: "Select a Pad",
+              description: "Long press a pad first to manage its sounds.",
+              variant: "default"
+            });
+         }, 0);
+     }
   }
 
    const handlePostFragment = async () => {
@@ -373,8 +395,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
     console.log("Posting Fragment:", { pads, bpm, originalAuthor, originalFragmentId });
 
+    // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1000));
 
+    // Show success toast after simulated post
     setTimeout(() => {
         toast({
           title: "Fragment Posted!",
@@ -414,12 +438,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         const padToPlay = pads[nextBeat];
 
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-             console.log(`Beat: ${nextBeat}, Playing Sounds: ${padToPlay.sounds.map(s => s.soundName).join(', ')}`);
-             padToPlay.sounds.forEach(sound => {
-                 if (sound.soundUrl) {
-                     // Actual audio playback needed here
-                 }
-             });
+             // In a real app, play the audio for the sound at padToPlay.currentSoundIndex
+             const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
+             console.log(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Playing Sound: ${soundToPlay?.soundName}`);
+             // Example: playAudio(soundToPlay.soundUrl);
         }
         return nextBeat; // Update the current beat for the next interval
       });
@@ -429,21 +451,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
-      // Remove toast for pause
-      // setTimeout(() => {
-      //     toast({
-      //       title: "Playback Paused",
-      //     });
-      // }, 0);
     } else {
       startPlayback();
-      // Remove toast for play
-      // setTimeout(() => {
-      //     toast({
-      //       title: "Playback Started",
-      //       description: `Playing at ${bpm} BPM`,
-      //     });
-      // }, 0);
     }
   };
 
@@ -452,112 +461,128 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) {
       setBpm(newBpm);
     } else if (event.target.value === '') {
-       setBpm(120);
+       setBpm(120); // Reset to default if input is cleared
     }
   };
 
+  // Effect to restart or stop playback if bpm or pads change while playing
   useEffect(() => {
     if (isPlaying) {
-      startPlayback();
-    } else {
-       stopPlayback();
+      startPlayback(); // Restart playback with new settings
     }
-    return stopPlayback;
-  }, [isPlaying, bpm, startPlayback, stopPlayback]);
+    // Cleanup function to stop playback when component unmounts or dependencies change
+    return () => stopPlayback();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, bpm, pads, startPlayback, stopPlayback]); // Re-run if isPlaying, bpm, or pads change
 
    const handleSheetOpenChange = (open: boolean) => {
      setIsSoundSheetOpen(open);
      if (!open) {
-       setSelectedPadId(null);
+       // Deselect pad when sheet closes, unless a long press is ongoing
+       if (!longPressTimerRef.current) {
+          setSelectedPadId(null);
+       }
      }
    };
 
 
   return (
     <TooltipProvider>
-      <Card className="w-full max-w-md shadow-lg">
+      <Card className="w-full max-w-md shadow-lg rounded-xl overflow-hidden">
         <CardContent className="p-4 md:p-6">
           <div className="grid grid-cols-4 gap-2 md:gap-3 aspect-square mb-6">
             {pads.map((pad) => {
-              const isPadActive = pad.isActive && pad.sounds.length > 0;
+              const isPadActive = pad.isActive; // Active state is now independent of having sounds
+              const hasSounds = pad.sounds.length > 0;
               const currentSoundIndex = pad.currentSoundIndex ?? 0;
-              const currentSound = pad.sounds[currentSoundIndex];
+              const currentSound = hasSounds ? pad.sounds[currentSoundIndex] : null;
 
               // Determine background color based on the *currently selected* sound in multi-sound pads
               const bgColorClass = isPadActive && currentSound
-                ? currentSound.color
-                : pad.isActive ? 'bg-secondary/70' : 'bg-secondary';
+                ? currentSound.color // Use color of current sound if active and sound exists
+                : isPadActive ? 'bg-secondary/70' // Active but no sound (e.g., preparing to assign)
+                : 'bg-secondary'; // Inactive
 
-              const borderColorClass = isPadActive ? 'border-transparent' : 'border-border';
+              const borderColorClass = isPadActive ? 'border-transparent' : 'border-border/50';
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
               const row = Math.floor(pad.id / 4);
-              const delay = `${row * 100}ms`;
+              const delay = `${row * 100}ms`; // Stagger animation
 
               // Determine content based on pad state
               const padContent = () => {
-                 // Dots Indicator for multiple sounds
+                 // --- Dots Indicator for multiple sounds ---
                  const dotsIndicator = pad.sounds.length > 1 && (
-                    <div className="absolute top-1.5 left-0 right-0 flex justify-center items-center space-x-1 pointer-events-none">
+                    <div className="absolute top-1.5 left-0 right-0 flex justify-center items-center space-x-1 pointer-events-none z-10">
                        {pad.sounds.map((s, idx) => (
                          <div
                            key={idx}
                            className={cn(
-                              "rounded-full transition-all duration-200",
-                              idx === currentSoundIndex ? `w-1.5 h-1.5 opacity-100` : `w-1 h-1 opacity-50`,
-                              s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400') + ' border' // Use border color derived from sound color
+                              "rounded-full transition-all duration-300 ease-out",
+                              // Active dot is larger, filled white, with border matching sound color
+                              idx === currentSoundIndex
+                                ? `w-2 h-2 opacity-100 bg-white border-2`
+                                : `w-1.5 h-1.5 opacity-60 bg-transparent border`, // Inactive dots smaller, transparent bg
+                              idx === currentSoundIndex ? s.color.replace('bg-','border-') : s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400') // Border color from sound
                            )}
                            style={{
-                             backgroundColor: idx === currentSoundIndex ? 'white' : 'transparent', // Fill active dot
-                             // Add slight scale effect
-                             transform: idx === currentSoundIndex ? 'scale(1.2)' : 'scale(1)',
+                             // Use inline style for dynamic border color based on the sound's color class
+                             borderColor: idx === currentSoundIndex ? `var(--color-${s.color.split('-')[1]})` : `var(--color-${s.color.split('-')[1]}-muted)`, // Crude way to get color name - needs refinement
+                             // Transform scale for active dot
+                             transform: idx === currentSoundIndex ? 'scale(1.1)' : 'scale(1)',
                            }}
                          />
                        ))}
                      </div>
                  );
 
-
-                 if (!pad.isActive) {
-                    return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>;
+                 // --- Pad State Visuals ---
+                 if (!isPadActive) {
+                    // Inactive pad: faint dot in the center
+                    return <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>;
                  }
-                 if (pad.sounds.length === 0) {
-                     return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-primary/30 animate-pulse"></div></div>;
+                 if (!hasSounds) {
+                     // Active but no sounds: pulsing dot indicating readiness
+                     return <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-3 h-3 rounded-full bg-primary/40 animate-pulse"></div></div>;
                  }
 
-                 // Always show the current sound (single or multi)
-                 const soundToDisplay = currentSound; // This will be the sound at currentSoundIndex
-                 if (!soundToDisplay) return null; // Should not happen if sounds array is not empty
+                 // Active pad with sound(s): Show current sound info and dots if multiple
+                 const soundToDisplay = currentSound; // This is the sound at currentSoundIndex
+                 if (!soundToDisplay) return null; // Should not happen if hasSounds is true
 
                  const soundIcon = soundToDisplay.source === 'live' ? Mic : Music2;
                  const soundName = soundToDisplay.soundName;
 
-
                  return (
-                     <Tooltip>
-                         {/* Use div for TooltipTrigger when it's not interactive */}
+                     <Tooltip delayDuration={300}>
                          <TooltipTrigger asChild>
-                            <div // Changed from button to div
-                                className="absolute inset-0 flex flex-col items-center justify-center p-1 pt-4 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing" // Add grab cursor
-                            >
+                             {/* The interactive element for swipe/press is the main button,
+                                but the visual content is inside this div */}
+                             <div
+                                className="absolute inset-0 flex flex-col items-center justify-center p-1 pt-5 text-white/90 overflow-hidden w-full h-full pointer-events-none" // Make non-interactive itself
+                             >
                                 {dotsIndicator} {/* Render dots above the icon/text */}
-                                {React.createElement(soundIcon, { className: "w-1/2 h-1/2 text-white/90 opacity-80 mb-1 mt-1 flex-shrink-0" })}
-                                <span className="text-xs text-white/90 opacity-90 truncate w-full text-center">{soundName}</span>
+                                {/* Icon and Text */}
+                                {React.createElement(soundIcon, { className: "w-[45%] h-[45%] opacity-80 mb-0.5 flex-shrink-0" })}
+                                <span className="text-xs opacity-90 truncate w-full text-center mt-1">{soundName}</span>
                             </div>
                          </TooltipTrigger>
                          <TooltipContent side="top" className="bg-background text-foreground">
+                           {/* Tooltip content shows list if multiple sounds, or just the name */}
                            {pad.sounds.length > 1 ? (
-                               <ul className="list-none p-0 m-0 space-y-1 max-w-[150px]">
-                                   {pad.sounds.map((s, idx) => (
-                                       <li key={s.soundId} className={cn("flex items-center", idx === currentSoundIndex ? "font-semibold" : "")}>
-                                           <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
-                                           <span className="truncate">{s.soundName}</span>
-                                       </li>
-                                   ))}
-                               </ul>
+                               <div className='max-w-[150px]'>
+                                   <ul className="list-none p-0 m-0 space-y-1 ">
+                                       {pad.sounds.map((s, idx) => (
+                                           <li key={s.soundId} className={cn("flex items-center", idx === currentSoundIndex ? "font-semibold" : "")}>
+                                               <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
+                                               <span className="truncate">{s.soundName}</span>
+                                           </li>
+                                       ))}
+                                   </ul>
+                                    <p className="text-xs text-muted-foreground mt-1 pt-1 border-t border-border/50">Swipe pad L/R to cycle</p>
+                               </div>
                            ) : (
-                                <p>{soundName}</p>
+                                <p>{soundName}</p> // Single sound name
                            )}
-                           {pad.sounds.length > 1 && <p className="text-xs text-muted-foreground mt-1">Swipe to cycle</p>}
                          </TooltipContent>
                      </Tooltip>
                  );
@@ -568,22 +593,31 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   key={pad.id}
                   onMouseDown={() => handlePadMouseDown(pad.id)}
                   onMouseUp={() => handlePadMouseUp(pad.id)}
-                  onMouseLeave={handlePadMouseLeave}
+                  onMouseLeave={() => handlePadMouseLeave(pad.id)} // Pass pad.id
                   onTouchStart={(e) => handlePadTouchStart(pad.id, e)}
-                  onTouchEnd={(e) => handlePadTouchEnd(pad.id, e)}
+                  onTouchEnd={() => handlePadTouchEnd(pad.id)} // Pass pad.id
                   onTouchMove={handlePadTouchMove} // Add touch move handler for swipe
                   className={cn(
-                    "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95",
+                    "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95 cursor-pointer",
+                    "touch-pan-y", // Allow vertical scroll, prevent horizontal page scroll during swipe
                     bgColorClass,
                     borderColorClass,
                     isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
-                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '',
-                    "opacity-0 animate-wave-fall",
-                    "overflow-hidden" // Ensure content doesn't overflow during swipe/animation
+                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '', // Ensure current beat is on top
+                    "opacity-0 animate-wave-fall", // Initial animation
+                    "overflow-hidden" // Crucial for containing content and animations
                   )}
                    style={{ animationDelay: delay }}
-                  aria-label={`Pad ${pad.id + 1}. Status: ${pad.isActive ? (pad.sounds.length > 0 ? `${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}` : 'Active, no sound') : 'Inactive'}. Short press to toggle activity. Long press to change sound${pad.sounds.length > 1 ? 's' : ''}. ${pad.sounds.length > 1 ? 'Swipe to cycle sounds.' : ''}`}
+                   aria-label={`Pad ${pad.id + 1}. Status: ${
+                      isPadActive
+                        ? hasSounds
+                          ? `${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}. Current: ${currentSound?.soundName || 'None'}`
+                          : 'Active, no sound'
+                        : 'Inactive'
+                    }. Short press to toggle activity. Long press to manage sounds.${
+                      pad.sounds.length > 1 ? ' Swipe left/right to cycle sounds.' : ''
+                    }`}
                 >
                   {padContent()}
                 </button>
@@ -591,7 +625,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
             })}
           </div>
            {/* Playback and Sound Controls */}
-           <div className="flex justify-between items-center space-x-4">
+           <div className="flex justify-between items-center space-x-4 mt-6">
              {/* Left side: Playback controls */}
              <div className="flex items-center space-x-2">
                <Tooltip>
@@ -633,6 +667,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                            type="number"
                            min="1"
                            max="300"
+                           step="1"
                            value={bpm}
                            onChange={handleBpmChange}
                            className="h-8"
@@ -648,13 +683,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              <div className="flex items-center space-x-2">
                  <Tooltip>
                     <TooltipTrigger asChild>
+                        {/* Changed Upload icon to Layers for multi-sound context */}
                         <Button variant="outline" size="sm" onClick={handleUploadClick}>
-                           <Upload className="mr-2 h-4 w-4" />
+                           <Layers className="mr-2 h-4 w-4" />
                            Sounds
                          </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                        <p>Open Sound Library</p>
+                        <p>Manage Sounds</p>
                         <p className="text-xs text-muted-foreground">(Long press a pad first)</p>
                     </TooltipContent>
                  </Tooltip>
@@ -664,7 +700,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                            variant="outline"
                            size="sm"
                            onClick={handleRecordClick}
-                           disabled // Disable until implemented
+                           disabled // Disable live recording until implemented
                          >
                            <Mic className="mr-2 h-4 w-4" />
                            Record
@@ -697,4 +733,3 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      </TooltipProvider>
   );
 }
-
