@@ -429,19 +429,21 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
-       setTimeout(() => {
-           toast({
-             title: "Playback Paused",
-           });
-       }, 0);
+      // Remove toast for pause
+      // setTimeout(() => {
+      //     toast({
+      //       title: "Playback Paused",
+      //     });
+      // }, 0);
     } else {
       startPlayback();
-       setTimeout(() => {
-           toast({
-             title: "Playback Started",
-             description: `Playing at ${bpm} BPM`,
-           });
-       }, 0);
+      // Remove toast for play
+      // setTimeout(() => {
+      //     toast({
+      //       title: "Playback Started",
+      //       description: `Playing at ${bpm} BPM`,
+      //     });
+      // }, 0);
     }
   };
 
