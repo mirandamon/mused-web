@@ -1,4 +1,4 @@
-{// src/lib/types.ts
+// src/lib/types.ts
 
 export type SoundSource = 'prerecorded' | 'live';
 
@@ -28,6 +28,7 @@ export interface Fragment {
   likes: number;
   comments: Comment[];
   title?: string; // Optional title for the fragment
+  bpm?: number; // Beats per minute for playback
   originalAuthor?: string; // If it's a remix
   originalFragmentId?: string; // If it's a remix
 }
@@ -41,3 +42,5 @@ export interface Sound {
   previewUrl?: string; // Optional URL for sound preview
   patternStyle?: string; // Optional class for background pattern/animation
 }
+
+    

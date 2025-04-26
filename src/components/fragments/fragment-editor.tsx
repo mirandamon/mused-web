@@ -1,14 +1,17 @@
 // src/components/fragments/fragment-editor.tsx
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Music2, Mic, Upload, Check } from 'lucide-react';
+import { Music2, Mic, Upload, Check, Play, Pause, Settings2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import SoundSelectionSheet from './sound-selection-sheet';
 import type { Pad, Sound } from '@/lib/types';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // Define a palette of Tailwind background color classes
 const colorPalette: string[] = [
@@ -47,6 +50,11 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartTimeRef = useRef<number>(0);
 
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentBeat, setCurrentBeat] = useState<number | null>(null);
+  const [bpm, setBpm] = useState<number>(120);
+  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const LONG_PRESS_DURATION = 500; // milliseconds
 
    // Initialize color map from initial pads
@@ -70,14 +78,6 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
             }
          }
          initialColorMap[pad.soundId] = color;
-
-         // Ensure the initialPad itself has the color property set correctly
-         // This seems redundant if initialPads *should* have the color, but acts as a fallback/correction
-         if (!pad.color || pad.color !== color) {
-            console.warn(`Correcting color for pad ${pad.id} with sound ${pad.soundId}`);
-            // This won't directly mutate initialPads, might need a state update if correction is needed
-             // For now, we just ensure the map is correct. The rendering logic will use the map.
-         }
        }
      });
 
@@ -90,7 +90,7 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
      }));
 
      setSoundColorMap(initialColorMap);
-   }, [initialPads]); // Rerun if initialPads change (e.g., navigating between remix pages)
+   }, [initialPads]);
 
 
   const handlePadMouseDown = (id: number) => {
@@ -147,12 +147,16 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
 
     // If sound is new, assign a random color
     if (!soundColor) {
-        soundColor = getRandomColor();
+        let availableColors = [...colorPalette];
+        if (availableColors.length === 0) availableColors = [...colorPalette]; // Replenish if needed
+        const randomIndex = Math.floor(Math.random() * availableColors.length);
+        soundColor = availableColors.splice(randomIndex, 1)[0];
         setSoundColorMap(prevMap => ({
             ...prevMap,
             [sound.id]: soundColor,
         }));
     }
+
 
     setPads(currentPads =>
       currentPads.map(pad =>
@@ -198,6 +202,9 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
   }
 
    const handlePostFragment = async () => {
+    if (isPlaying) {
+        handlePlayPause(); // Stop playback before posting
+    }
     const activePads = pads.filter(p => p.isActive && p.soundId); // Ensure pad has a sound
     if (activePads.length === 0) {
         toast({
@@ -210,7 +217,7 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
 
     // TODO: Implement actual fragment posting logic (Server Action)
     // The 'pads' state now includes the 'color' and 'soundId'
-    console.log("Posting Fragment:", { pads, originalAuthor, originalFragmentId });
+    console.log("Posting Fragment:", { pads, bpm, originalAuthor, originalFragmentId });
 
     // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -224,13 +231,69 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
          </Button>
       ),
     });
-
-    // Optionally clear state after posting (maybe not for remix?)
-    // if (!originalFragmentId) {
-    //   setPads(defaultPads);
-    //   setSoundColorMap({});
-    // }
   };
+
+  // --- Playback Logic ---
+
+  const stopPlayback = useCallback(() => {
+    if (playbackIntervalRef.current) {
+      clearInterval(playbackIntervalRef.current);
+      playbackIntervalRef.current = null;
+    }
+    setIsPlaying(false);
+    setCurrentBeat(null);
+  }, []);
+
+  const startPlayback = useCallback(() => {
+    if (playbackIntervalRef.current) {
+      clearInterval(playbackIntervalRef.current);
+    }
+    setIsPlaying(true);
+    setCurrentBeat(0); // Start from the first beat
+
+    const beatDuration = (60 / bpm) * 1000; // milliseconds per beat
+
+    playbackIntervalRef.current = setInterval(() => {
+      setCurrentBeat(prevBeat => {
+        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16;
+        // TODO: Trigger sound playback for pads[nextBeat] if it's active
+        // console.log(`Beat: ${nextBeat}, Sound: ${pads[nextBeat]?.sound}`);
+        return nextBeat;
+      });
+    }, beatDuration);
+  }, [bpm]); // Removed 'pads' dependency for now
+
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      stopPlayback();
+    } else {
+      startPlayback();
+    }
+  };
+
+  const handleBpmChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newBpm = parseInt(event.target.value, 10);
+    if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) { // Basic validation
+      setBpm(newBpm);
+    } else if (event.target.value === '') {
+       // Allow clearing the input, maybe set a default or keep last valid value?
+       // For now, let's reset to 120 if cleared incorrectly, or handle NaN better
+       setBpm(120);
+    }
+  };
+
+  // Effect to handle changes in isPlaying or bpm
+  useEffect(() => {
+    if (isPlaying) {
+      // Restart interval with new BPM if it changed while playing
+      startPlayback();
+    } else {
+       // Ensure interval is cleared if isPlaying becomes false
+       stopPlayback();
+    }
+    // Cleanup function to clear interval on component unmount or when dependencies change
+    return stopPlayback;
+  }, [isPlaying, bpm, startPlayback, stopPlayback]);
 
 
   return (
@@ -242,6 +305,7 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
               const assignedColor = pad.isActive && pad.soundId ? soundColorMap[pad.soundId] : null;
               const bgColorClass = assignedColor || 'bg-secondary'; // Fallback to secondary if no color
               const borderColorClass = assignedColor ? 'border-transparent' : 'border-border'; // Transparent border if colored
+              const isCurrentBeat = isPlaying && currentBeat === pad.id;
 
               return (
                 <button
@@ -255,9 +319,10 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
                     "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95",
                     bgColorClass, // Apply dynamic background color
                     borderColorClass, // Apply dynamic border color
-                    pad.isActive ? 'shadow-md scale-105' : 'hover:bg-muted hover:border-primary/50',
+                    pad.isActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
-                    "animate-in fade-in zoom-in-95"
+                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '', // Highlight current beat
+                    "animate-in fade-in zoom-in-95" // Entry animation
                   )}
                   style={{ animationDelay: `${pad.id * 20}ms` }}
                   aria-label={`Pad ${pad.id + 1} ${pad.isActive ? `Active with ${pad.sound}` : 'Inactive'}. Long press to change sound.`}
@@ -273,23 +338,65 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
               );
             })}
           </div>
-           <div className="flex justify-center space-x-4">
-            <Button variant="outline" onClick={handleUploadClick}>
-               <Upload className="mr-2 h-4 w-4" />
-               Sounds Lib
-             </Button>
-             <Button
-               variant="outline" // Keep outline, maybe change icon color if needed
-               onClick={handleRecordClick}
-               disabled // Disable until implemented
-             >
-               <Mic className="mr-2 h-4 w-4" />
-               {isRecording ? 'Stop Recording' : 'Record Live'}
-             </Button>
+           <div className="flex justify-between items-center space-x-4">
+             {/* Left Controls: Play/Pause and BPM */}
+             <div className="flex items-center space-x-2">
+               <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
+                 {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+               </Button>
+
+               <Popover>
+                  <PopoverTrigger asChild>
+                     <Button variant="ghost" size="icon" aria-label="Playback Settings">
+                       <Settings2 className="h-5 w-5" />
+                     </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48 p-4">
+                     <div className="grid gap-4">
+                       <div className="space-y-2">
+                         <h4 className="font-medium leading-none">Playback</h4>
+                         <p className="text-sm text-muted-foreground">
+                           Adjust the tempo.
+                         </p>
+                       </div>
+                       <div className="grid gap-2">
+                         <Label htmlFor="bpm-input">BPM</Label>
+                         <Input
+                           id="bpm-input"
+                           type="number"
+                           min="1"
+                           max="300"
+                           value={bpm}
+                           onChange={handleBpmChange}
+                           className="h-8"
+                         />
+                       </div>
+                     </div>
+                  </PopoverContent>
+                </Popover>
+               <span className="text-sm text-muted-foreground tabular-nums">{bpm} BPM</span>
+             </div>
+
+             {/* Right Controls: Sound Lib and Record */}
+             <div className="flex items-center space-x-2">
+                <Button variant="outline" size="sm" onClick={handleUploadClick}>
+                   <Upload className="mr-2 h-4 w-4" />
+                   Sounds
+                 </Button>
+                 <Button
+                   variant="outline" // Keep outline, maybe change icon color if needed
+                   size="sm"
+                   onClick={handleRecordClick}
+                   disabled // Disable until implemented
+                 >
+                   <Mic className="mr-2 h-4 w-4" />
+                   Record
+                 </Button>
+            </div>
           </div>
         </CardContent>
-        <CardFooter className="flex justify-end p-4">
-          <Button onClick={handlePostFragment}>
+        <CardFooter className="flex justify-end p-4 border-t mt-4"> {/* Add border-t and mt-4 */}
+          <Button onClick={handlePostFragment} disabled={isPlaying}> {/* Disable post while playing */}
              <Check className="mr-2 h-4 w-4" />
              {originalFragmentId ? 'Post Remix' : 'Post Fragment'}
           </Button>
@@ -305,3 +412,5 @@ export default function FragmentEditor({ initialPads = defaultPads, originalAuth
      </>
   );
 }
+
+    

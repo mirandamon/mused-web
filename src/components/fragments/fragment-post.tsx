@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -25,7 +25,9 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
   const [newComment, setNewComment] = useState('');
   const [comments, setComments] = useState<Comment[]>(fragment.comments);
   const [likeCount, setLikeCount] = useState(fragment.likes);
+  const [currentBeat, setCurrentBeat] = useState<number | null>(null);
 
+  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
   const handleLike = () => {
@@ -38,14 +40,60 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
     });
   };
 
+  // --- Playback Logic ---
+  const stopPlayback = useCallback(() => {
+    if (playbackIntervalRef.current) {
+      clearInterval(playbackIntervalRef.current);
+      playbackIntervalRef.current = null;
+    }
+    setIsPlaying(false);
+    setCurrentBeat(null);
+  }, []);
+
+  const startPlayback = useCallback(() => {
+    if (playbackIntervalRef.current) {
+      clearInterval(playbackIntervalRef.current);
+    }
+    setIsPlaying(true);
+    setCurrentBeat(0); // Start from the first beat
+
+    const bpm = fragment.bpm || 120; // Use fragment BPM or default to 120
+    const beatDuration = (60 / bpm) * 1000; // milliseconds per beat
+
+    playbackIntervalRef.current = setInterval(() => {
+      setCurrentBeat(prevBeat => {
+        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16;
+        // TODO: Trigger actual sound playback for fragment.pads[nextBeat] if it's active
+        // This requires a more complex audio engine integration.
+        // console.log(`Post Beat: ${nextBeat}, Sound: ${fragment.pads[nextBeat]?.sound}`);
+        return nextBeat;
+      });
+    }, beatDuration);
+  }, [fragment.bpm, fragment.pads]); // Depend on fragment's bpm and pads
+
   const handlePlayPause = () => {
-     // TODO: Implement actual audio playback logic
-    setIsPlaying(!isPlaying);
-     toast({
-      title: isPlaying ? "Playback Paused" : "Playback Started",
-      description: `${isPlaying ? 'Paused' : 'Playing'} ${fragment.author}'s fragment.`,
-    });
+     if (isPlaying) {
+       stopPlayback();
+       toast({
+         title: "Playback Paused",
+         description: `Paused ${fragment.author}'s fragment.`,
+       });
+     } else {
+       startPlayback();
+       toast({
+         title: "Playback Started",
+         description: `Playing ${fragment.author}'s fragment at ${fragment.bpm || 120} BPM.`,
+       });
+     }
   };
+
+  // Cleanup playback on component unmount
+  useEffect(() => {
+    return () => {
+      stopPlayback();
+    };
+  }, [stopPlayback]);
+
 
   const handleCommentSubmit = (e: React.FormEvent) => {
      e.preventDefault();
@@ -75,14 +123,16 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
           <AvatarFallback>{fragment.author.substring(0, 2).toUpperCase()}</AvatarFallback>
         </Avatar>
         <div className="flex-1">
-          <CardTitle className="text-sm font-medium">{fragment.author}</CardTitle>
-           {fragment.originalAuthor && (
-             <p className="text-xs text-muted-foreground">
-               Remixed from <span className="font-medium text-primary">{fragment.originalAuthor}</span>
-             </p>
-           )}
+          <CardTitle className="text-sm font-medium">{fragment.title || 'Untitled Fragment'}</CardTitle>
+          <p className="text-xs text-muted-foreground">
+             By {fragment.author}
+             {fragment.originalAuthor && (
+               <> • Remixed from <span className="font-medium text-primary">{fragment.originalAuthor}</span></>
+             )}
+          </p>
           <p className="text-xs text-muted-foreground">
             {formatDistanceToNow(fragment.timestamp, { addSuffix: true })}
+             {fragment.bpm && ` • ${fragment.bpm} BPM`}
           </p>
         </div>
          <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
@@ -96,28 +146,32 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
            {fragment.pads.map(pad => {
              // Use the pad's color if active and color exists, otherwise use muted
              const bgColorClass = pad.isActive && pad.color ? pad.color : 'bg-muted/50';
-             const opacityClass = pad.isActive && pad.color ? 'opacity-70' : 'opacity-100'; // Make colored pads slightly transparent?
+             // const opacityClass = pad.isActive && pad.color ? 'opacity-70' : 'opacity-100'; // Keep opacity consistent
+             const isCurrentBeat = isPlaying && currentBeat === pad.id;
 
              return (
                <div
                  key={pad.id}
                  className={cn(
-                   "w-full h-full rounded transition-colors duration-300",
+                   "w-full h-full rounded transition-all duration-100", // Faster transition for beat highlight
                    bgColorClass,
-                   opacityClass // Apply opacity
+                   // opacityClass // Apply opacity
+                   isCurrentBeat ? 'ring-2 ring-offset-1 ring-accent scale-[1.08] shadow-md' : '' // Highlight style for current beat
                  )}
-                 // Apply pulse animation only if playing and the pad is active with a color
-                 style={{ animation: isPlaying && pad.isActive && pad.color ? `pulse 1s infinite ${pad.id * 0.05}s` : 'none' }}
+                 // Apply pulse animation only if playing and the pad is active with a color - REMOVED for clarity with beat highlight
+                 // style={{ animation: isPlaying && pad.isActive && pad.color ? `pulse 1s infinite ${pad.id * 0.05}s` : 'none' }}
                />
              );
            })}
          </div>
+         {/* Keep pulse animation CSS if you might re-enable it
          <style jsx>{`
            @keyframes pulse {
-             0%, 100% { opacity: 0.6; transform: scale(1); } /* Start/end slightly faded */
-             50% { opacity: 0.9; transform: scale(1.05); } /* Pulse brighter and slightly larger */
+             0%, 100% { opacity: 0.6; transform: scale(1); }
+             50% { opacity: 0.9; transform: scale(1.05); }
            }
          `}</style>
+          */}
       </CardContent>
 
       <CardFooter className="flex flex-col items-start p-4 space-y-3">
@@ -172,3 +226,5 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
     </Card>
   );
 }
+
+    

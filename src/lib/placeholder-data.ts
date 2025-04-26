@@ -81,6 +81,7 @@ export const placeholderFragments: Fragment[] = [
       { id: 'c1-2', author: 'LoopQueen', text: 'Love the bassline pads', timestamp: new Date(Date.now() - 1000 * 60 * 1) },
     ],
     title: 'Neon Drive Beat',
+    bpm: 110, // Add BPM
   },
   {
     id: 'frag-2',
@@ -93,6 +94,7 @@ export const placeholderFragments: Fragment[] = [
        { id: 'c2-1', author: 'ChillHopFan', text: 'So chill!', timestamp: new Date(Date.now() - 1000 * 60 * 30) },
     ],
     title: 'Rainy Day Loop',
+    bpm: 90, // Add BPM
   },
   {
     id: 'frag-3',
@@ -105,6 +107,7 @@ export const placeholderFragments: Fragment[] = [
     originalAuthor: 'SynthWaveKid', // Mark as remix
     originalFragmentId: 'frag-1',
     title: 'Neon Drive Remix',
+    bpm: 125, // Add BPM (remixed tempo)
   },
    {
     id: 'frag-4',
@@ -117,5 +120,8 @@ export const placeholderFragments: Fragment[] = [
        { id: 'c4-1', author: 'ListenerX', text: 'Simple but effective', timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5) },
     ],
     title: 'Simple Chords',
+    bpm: 80, // Add BPM
   },
 ];
+
+    
