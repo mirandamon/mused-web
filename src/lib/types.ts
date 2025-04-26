@@ -2,14 +2,20 @@
 
 export type SoundSource = 'prerecorded' | 'live';
 
+// Interface for storing information about a single sound assigned to a pad
+export interface PadSound {
+  soundId: string;
+  soundName: string; // Store name directly for easier access
+  soundUrl?: string;
+  source?: SoundSource;
+  color: string; // Color associated with this specific soundId
+}
+
 export interface Pad {
   id: number;
-  sound?: string; // Name or identifier for the sound
-  soundId?: string; // Unique ID of the sound
-  soundUrl?: string; // Optional: URL for playback
-  source?: SoundSource;
-  isActive: boolean;
-  color?: string; // Assigned color class (e.g., 'bg-red-500')
+  sounds: PadSound[]; // Array to hold multiple sounds
+  isActive: boolean; // A pad is active if it has at least one sound and is toggled on
+  // Removed single sound properties: sound?, soundId?, soundUrl?, source?, color?
 }
 
 export interface Comment {
@@ -33,7 +39,7 @@ export interface Fragment {
   originalFragmentId?: string; // If it's a remix
 }
 
-// New Type for Sounds
+// Type for Sounds in the library/marketplace remains the same
 export interface Sound {
   id: string;
   name: string;
@@ -42,5 +48,3 @@ export interface Sound {
   previewUrl?: string; // Optional URL for sound preview
   patternStyle?: string; // Optional class for background pattern/animation
 }
-
-    

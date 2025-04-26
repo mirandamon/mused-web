@@ -1,11 +1,9 @@
 // src/lib/placeholder-data.ts
-import type { Fragment, Pad } from './types';
-import { presetSounds, marketplaceSounds } from './placeholder-sounds'; // Import sounds
+import type { Fragment, Pad, PadSound } from './types';
+import { presetSounds, marketplaceSounds } from './placeholder-sounds';
 
-// Combine sounds for easier lookup
 const allSounds = [...presetSounds, ...marketplaceSounds];
 
-// Define a palette of Tailwind background color classes (reuse from editor or centralize)
 const colorPalette: string[] = [
   'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
   'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500',
@@ -15,14 +13,13 @@ const colorPalette: string[] = [
   'bg-red-600', 'bg-orange-600', 'bg-blue-600', 'bg-green-600', 'bg-purple-600',
 ];
 
-// Maintain a map to ensure consistent colors for the same sound ID across fragments
 const soundColorMap: { [soundId: string]: string } = {};
-let availableColors = [...colorPalette]; // Mutable copy for assignment
+let availableColors = [...colorPalette];
 
 const getRandomColor = (): string => {
-  if (availableColors.length === 0) availableColors = [...colorPalette]; // Replenish if empty
+  if (availableColors.length === 0) availableColors = [...colorPalette];
   const randomIndex = Math.floor(Math.random() * availableColors.length);
-  return availableColors.splice(randomIndex, 1)[0]; // Remove chosen color
+  return availableColors.splice(randomIndex, 1)[0];
 };
 
 const getSoundColor = (soundId: string): string => {
@@ -32,96 +29,111 @@ const getSoundColor = (soundId: string): string => {
   return soundColorMap[soundId];
 };
 
-const generatePads = (activeIndices: number[], soundMapping: { [index: number]: string }): Pad[] => {
+// Updated function to generate pads with potentially multiple sounds
+const generatePads = (activeIndices: number[], soundMapping: { [index: number]: string | string[] }): Pad[] => {
   return Array.from({ length: 16 }, (_, i) => {
     const isActive = activeIndices.includes(i);
-    const soundId = isActive ? soundMapping[i] : undefined;
-    const sound = soundId ? allSounds.find(s => s.id === soundId) : undefined;
-    const color = soundId ? getSoundColor(soundId) : undefined;
+    const soundInput = soundMapping[i]; // Can be single ID or array of IDs
+    const padSounds: PadSound[] = [];
+
+    if (isActive && soundInput) {
+      const soundIds = Array.isArray(soundInput) ? soundInput : [soundInput];
+      soundIds.forEach(soundId => {
+        const sound = allSounds.find(s => s.id === soundId);
+        if (sound) {
+          const color = getSoundColor(soundId);
+          padSounds.push({
+            soundId: soundId,
+            soundName: sound.name,
+            soundUrl: sound.previewUrl,
+            source: sound.type === 'preset' ? 'prerecorded' : 'prerecorded',
+            color: color,
+          });
+        }
+      });
+    }
 
     return {
       id: i,
-      isActive: isActive,
-      sound: sound?.name,
-      soundId: soundId,
-      source: sound ? (sound.type === 'preset' ? 'prerecorded' : 'prerecorded') : undefined,
-      color: color, // Assign color
+      sounds: padSounds,
+      isActive: isActive, // Pad is active if in activeIndices (even if sound lookup fails)
     };
   });
 };
 
-// Define sound assignments for each fragment's active pads
+// --- Sound Mappings (Can now include arrays for multiple sounds) ---
 const frag1SoundMap = {
   0: 'preset-kick-1', 2: 'preset-snare-1', 5: 'preset-hihat-1', 7: 'preset-hihat-1',
-  8: 'preset-kick-1', 10: 'preset-snare-1', 13: 'preset-bass-1', 15: 'preset-bass-1',
+  8: 'preset-kick-1', 10: 'preset-snare-1', 13: ['preset-bass-1', 'mkt-fx-1'], // Multiple sounds on pad 13
+  15: 'preset-bass-1',
 };
 const frag2SoundMap = {
   1: 'mkt-kick-2', 3: 'mkt-snare-2', 4: 'mkt-hihat-2', 6: 'mkt-hihat-2',
   9: 'mkt-bass-2', 11: 'mkt-bass-2', 12: 'mkt-vox-1', 14: 'mkt-vox-1',
 };
-const frag3SoundMap = { // Remix of frag1, potentially with changes
+const frag3SoundMap = { // Remix of frag1
   0: 'preset-kick-1', 1: 'mkt-clap-1', 2: 'preset-snare-1', 3: 'mkt-clap-1',
-  5: 'preset-hihat-1', 6: 'mkt-perc-1', 9: 'preset-bass-1', 10: 'mkt-fx-1',
-  13: 'preset-bass-1', 14: 'mkt-fx-1',
+  5: 'preset-hihat-1', 6: 'mkt-perc-1', 9: 'preset-bass-1', 10: ['mkt-fx-1', 'preset-lead-1'], // Multiple sounds
+  13: ['preset-bass-1', 'mkt-fx-1'], // Kept multiple sounds from frag1
+  14: 'mkt-fx-1',
 };
 const frag4SoundMap = {
   4: 'mkt-lead-2', 5: 'mkt-lead-2', 6: 'preset-pad-1', 7: 'preset-pad-1',
 };
 
+// --- Placeholder Fragments ---
 export const placeholderFragments: Fragment[] = [
   {
     id: 'frag-1',
     author: 'SynthWaveKid',
     authorAvatar: 'https://picsum.photos/seed/frag1/40/40',
-    timestamp: new Date(Date.now() - 1000 * 60 * 5), // 5 minutes ago
+    timestamp: new Date(Date.now() - 1000 * 60 * 5),
     pads: generatePads([0, 2, 5, 7, 8, 10, 13, 15], frag1SoundMap),
     likes: 12,
     comments: [
       { id: 'c1-1', author: 'BeatMaster', text: 'Nice groove!', timestamp: new Date(Date.now() - 1000 * 60 * 2) },
-      { id: 'c1-2', author: 'LoopQueen', text: 'Love the bassline pads', timestamp: new Date(Date.now() - 1000 * 60 * 1) },
+      { id: 'c1-2', author: 'LoopQueen', text: 'Love the layered sound on pad 13!', timestamp: new Date(Date.now() - 1000 * 60 * 1) },
     ],
     title: 'Neon Drive Beat',
-    bpm: 110, // Add BPM
+    bpm: 110,
   },
   {
     id: 'frag-2',
     author: 'LoFiDreamer',
     authorAvatar: 'https://picsum.photos/seed/frag2/40/40',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
+    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
     pads: generatePads([1, 3, 4, 6, 9, 11, 12, 14], frag2SoundMap),
     likes: 45,
     comments: [
        { id: 'c2-1', author: 'ChillHopFan', text: 'So chill!', timestamp: new Date(Date.now() - 1000 * 60 * 30) },
     ],
     title: 'Rainy Day Loop',
-    bpm: 90, // Add BPM
+    bpm: 90,
   },
   {
     id: 'frag-3',
     author: 'RemixNinja',
     authorAvatar: 'https://picsum.photos/seed/frag3/40/40',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 8), // 8 hours ago
+    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 8),
     pads: generatePads([0, 1, 2, 3, 5, 6, 9, 10, 13, 14], frag3SoundMap),
     likes: 8,
     comments: [],
-    originalAuthor: 'SynthWaveKid', // Mark as remix
+    originalAuthor: 'SynthWaveKid',
     originalFragmentId: 'frag-1',
-    title: 'Neon Drive Remix',
-    bpm: 125, // Add BPM (remixed tempo)
+    title: 'Neon Drive Remix V2',
+    bpm: 125,
   },
    {
     id: 'frag-4',
     author: 'AcousticSoul',
     authorAvatar: 'https://picsum.photos/seed/frag4/40/40',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
+    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24),
     pads: generatePads([4, 5, 6, 7], frag4SoundMap),
     likes: 22,
     comments: [
        { id: 'c4-1', author: 'ListenerX', text: 'Simple but effective', timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5) },
     ],
     title: 'Simple Chords',
-    bpm: 80, // Add BPM
+    bpm: 80,
   },
 ];
-
-    
