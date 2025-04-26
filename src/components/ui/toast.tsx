@@ -50,7 +50,19 @@ const Toast = React.forwardRef<
       ref={ref}
       className={cn(toastVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {/* Main content passed as children */}
+      {props.children}
+      {/* Countdown Progress Bar */}
+      <div
+        className={cn(
+          "absolute bottom-0 left-0 h-1 w-full origin-left", // Base styles
+          "bg-primary", // Default color
+          "group-[.destructive]:bg-destructive-foreground", // Color for destructive variant
+          "animate-toast-countdown" // Apply the animation
+        )}
+       />
+    </ToastPrimitives.Root>
   )
 })
 Toast.displayName = ToastPrimitives.Root.displayName

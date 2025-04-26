@@ -131,6 +131,11 @@ export default {
                 'background-position': 'right center'
               }
             },
+            // Keyframes for toast countdown
+            "toast-countdown": {
+              "0%": { transform: "scaleX(1)" },
+              "100%": { transform: "scaleX(0)" },
+            },
         },
         animation: {
           'accordion-down': 'accordion-down 0.2s ease-out',
@@ -141,6 +146,8 @@ export default {
            // Animation utility for gradient
            "gradient-xy": 'gradient-xy 15s ease infinite',
            "gradient-xy-slow": 'gradient-xy 25s ease infinite', // Slower version
+           // Animation for toast countdown (4 seconds duration)
+           "toast-countdown": 'toast-countdown 4s linear forwards',
         }
       }
     },
