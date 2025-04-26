@@ -127,8 +127,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      touchStartTimeRef.current = Date.now();
      longPressTimerRef.current = setTimeout(() => {
       setSelectedPadId(id);
-      const padData = pads.find(p => p.id === id) || null;
-      setCurrentSelectedPadData(padData);
+      // No need to set currentSelectedPadData here, useEffect will handle it
+      // const padData = pads.find(p => p.id === id) || null;
+      // setCurrentSelectedPadData(padData);
       setIsSoundSheetOpen(true);
       longPressTimerRef.current = null;
     }, LONG_PRESS_DURATION);
@@ -142,15 +143,23 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
       const pressDuration = Date.now() - touchStartTimeRef.current;
       if (pressDuration < LONG_PRESS_DURATION) {
           // Short press action: Toggle pad active state
-           setPads(currentPads =>
-             currentPads.map(pad =>
-               pad.id === id ? { ...pad, isActive: !pad.isActive } : pad
-             )
-           );
-           const targetPad = pads.find(p => p.id === id);
-           toast({
-             title: `Pad ${id + 1} ${targetPad?.isActive ? 'Deactivated' : 'Activated'}`
+           let padStatusMessage = "";
+           setPads(currentPads => {
+              const updatedPads = currentPads.map(pad => {
+                 if (pad.id === id) {
+                     const newState = !pad.isActive;
+                     padStatusMessage = `Pad ${id + 1} ${newState ? 'Activated' : 'Deactivated'}`;
+                     return { ...pad, isActive: newState };
+                 }
+                 return pad;
+               });
+               return updatedPads;
            });
+           if (padStatusMessage) {
+               toast({
+                 title: padStatusMessage
+               });
+           }
       }
     }
      touchStartTimeRef.current = 0; // Reset start time
@@ -171,13 +180,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
    const handleToggleSound = (sound: Sound) => {
      if (selectedPadId === null) return;
 
-     setPads(currentPads =>
-       currentPads.map(pad => {
+     let toastMessage = ""; // Define toastMessage outside setPads
+
+     setPads(currentPads => {
+       const updatedPads = currentPads.map(pad => {
          if (pad.id !== selectedPadId) return pad;
 
          const soundIndex = pad.sounds.findIndex(s => s.soundId === sound.id);
          let newSounds: PadSound[];
-         let toastMessage = "";
 
          if (soundIndex > -1) {
            // Sound exists, remove it
@@ -188,6 +198,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            let assignedColor = soundColorMap[sound.id];
            if (!assignedColor) {
              assignedColor = getRandomColor(availableColorsRef.current);
+             // Update color map in a separate effect or via a direct state update if needed immediately
+             // For now, we assume the color map update happens correctly outside this scope or is handled later
              setSoundColorMap(prevMap => ({ ...prevMap, [sound.id]: assignedColor! }));
            }
            const newPadSound: PadSound = {
@@ -201,23 +213,30 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            toastMessage = `${sound.name} added to Pad ${selectedPadId + 1}.`;
          }
 
-         // Update toast
-         toast({ title: "Sound Updated", description: toastMessage });
-
-         // Update pad state: isActive is true if there are sounds, otherwise keep existing state
+         // Return the updated pad state
          return { ...pad, sounds: newSounds, isActive: newSounds.length > 0 ? true : pad.isActive };
-       })
-     );
-
-     // Update the currently selected pad data *after* state update to reflect changes in the sheet
-     setCurrentSelectedPadData(prevData => {
-         if (!prevData || prevData.id !== selectedPadId) return prevData; // Should not happen but safety check
-         const updatedPad = pads.find(p => p.id === selectedPadId);
-         return updatedPad || null;
+       });
+       return updatedPads; // Return the full updated pads array
      });
 
+     // Show toast *after* the state update has been queued
+     if (toastMessage) {
+       toast({ title: "Sound Updated", description: toastMessage });
+     }
+
      // Note: Sheet closing is handled by the Sheet component itself via onOpenChange
+     // setIsSoundSheetOpen(false); // Do not close sheet automatically
    };
+
+   // Update currentSelectedPadData whenever selectedPadId or pads change
+    useEffect(() => {
+        if (selectedPadId !== null) {
+        const padData = pads.find(p => p.id === selectedPadId) || null;
+        setCurrentSelectedPadData(padData);
+        } else {
+        setCurrentSelectedPadData(null);
+        }
+    }, [selectedPadId, pads]);
 
 
   const handleRecordClick = () => {
@@ -256,6 +275,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
     console.log("Posting Fragment:", { pads, bpm, originalAuthor, originalFragmentId });
 
+    // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     toast({
@@ -285,61 +305,80 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
       clearInterval(playbackIntervalRef.current);
     }
     setIsPlaying(true);
-    setCurrentBeat(0);
+    setCurrentBeat(0); // Start from the first beat
 
-    const beatDuration = (60 / bpm) * 1000;
+    const beatDuration = (60 / bpm) * 1000; // Calculate duration based on BPM
 
     playbackIntervalRef.current = setInterval(() => {
       setCurrentBeat(prevBeat => {
-        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16;
+        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop through 0-15
         const padToPlay = pads[nextBeat];
-        // If pad is active and has sounds, play them (needs proper audio implementation)
+
+        // If pad is active and has sounds, play them (requires audio implementation)
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-             // TODO: Trigger playback of all sounds in padToPlay.sounds
-             // console.log(`Beat: ${nextBeat}, Sounds: ${padToPlay.sounds.map(s => s.soundName).join(', ')}`);
+             console.log(`Beat: ${nextBeat}, Playing Sounds: ${padToPlay.sounds.map(s => s.soundName).join(', ')}`);
+             // --- Placeholder for actual audio playback ---
+             // You would likely use Web Audio API or a library like Howler.js here
              padToPlay.sounds.forEach(sound => {
                  if (sound.soundUrl) {
+                     // Example: using Audio object (simple, but limited)
                      // const audio = new Audio(sound.soundUrl);
                      // audio.play().catch(e => console.error("Error playing sound:", e));
+                     // Note: Repeatedly creating Audio objects might not be efficient
                  }
              });
+             // --- End Placeholder ---
+        } else {
+           // Optional: Log inactive beats or do nothing
+           // console.log(`Beat: ${nextBeat}, Inactive or No Sound`);
         }
-        return nextBeat;
+        return nextBeat; // Update the current beat for the next interval
       });
     }, beatDuration);
-  }, [bpm, pads]);
+  }, [bpm, pads]); // Dependencies: bpm and pads array
 
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
+       toast({
+         title: "Playback Paused",
+       });
     } else {
       startPlayback();
+       toast({
+         title: "Playback Started",
+         description: `Playing at ${bpm} BPM`,
+       });
     }
   };
 
   const handleBpmChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newBpm = parseInt(event.target.value, 10);
-    if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) {
+    if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) { // Set reasonable BPM limits
       setBpm(newBpm);
     } else if (event.target.value === '') {
-       setBpm(120);
+       setBpm(120); // Reset to default if input is cleared
     }
+    // If currently playing, the interval will update automatically due to useEffect dependency
   };
 
+  // Effect to manage playback interval cleanup and updates
   useEffect(() => {
+    // If playing, ensure the interval reflects the current state (BPM, pads)
     if (isPlaying) {
-      startPlayback();
+      startPlayback(); // This will clear the old interval and start a new one
     } else {
-       stopPlayback();
+       stopPlayback(); // Ensure stopped if isPlaying becomes false
     }
+    // Cleanup function to stop playback when the component unmounts or dependencies change significantly
     return stopPlayback;
-  }, [isPlaying, bpm, startPlayback, stopPlayback]);
+  }, [isPlaying, bpm, startPlayback, stopPlayback]); // Added startPlayback and stopPlayback to dependencies
 
    const handleSheetOpenChange = (open: boolean) => {
      setIsSoundSheetOpen(open);
      if (!open) {
-       setSelectedPadId(null);
-       setCurrentSelectedPadData(null);
+       setSelectedPadId(null); // Reset selected pad when sheet closes
+       // setCurrentSelectedPadData(null); // Let the useEffect handle this
      }
    };
 
@@ -355,28 +394,31 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
               // If one sound, use its color. If inactive or no sounds, use secondary.
               const bgColorClass = isPadActive
                 ? pad.sounds.length === 1
-                    ? pad.sounds[0].color
+                    ? pad.sounds[0].color // Use the color of the single sound
                     : 'bg-gradient-to-br from-muted to-secondary' // Gradient/Neutral for multiple sounds
-                : 'bg-secondary';
+                : pad.isActive ? 'bg-secondary/70' : 'bg-secondary'; // Dimmer for active but no sound, normal secondary for inactive
               const borderColorClass = isPadActive ? 'border-transparent' : 'border-border';
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
               const row = Math.floor(index / 4);
-              const delay = `${row * 100}ms`;
+              const delay = `${row * 100}ms`; // Animation delay based on row
 
+              // Determine content based on pad state
               const padContent = () => {
                  if (!pad.isActive) {
-                    return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>; // Inactive
+                    // Inactive Pad: Subtle indicator
+                    return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>;
                  }
                  if (pad.sounds.length === 0) {
-                     return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-primary/30 animate-pulse"></div></div>; // Active, no sound
+                     // Active, No Sound: Pulsing dot to indicate readiness
+                     return <div className="absolute inset-0 flex items-center justify-center"><div className="w-3 h-3 rounded-full bg-primary/30 animate-pulse"></div></div>;
                  }
                  if (pad.sounds.length === 1) {
+                     // Single Sound: Show icon and truncated name
                      const sound = pad.sounds[0];
-                     // Single sound display (like before)
                      return (
                          <Tooltip>
                             <TooltipTrigger className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
-                                {/* Consistent white text */}
+                                {/* Consistent white text on colored background */}
                                 {sound.source === 'live' ? <Mic className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1"/> : <Music2 className="w-1/2 h-1/2 text-white/90 opacity-80 mb-1" />}
                                 <span className="text-xs text-white/90 opacity-90 truncate w-full text-center">{sound.soundName}</span>
                             </TooltipTrigger>
@@ -386,25 +428,25 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                         </Tooltip>
                      );
                  }
-                 // Multiple sounds display
+                 // Multiple Sounds: Show Layers icon and count
                  return (
                      <Tooltip>
                         <TooltipTrigger className="absolute inset-0 flex flex-col items-center justify-center p-1 overflow-hidden w-full h-full">
                             <Layers className="w-1/2 h-1/2 text-white opacity-90 mb-1" />
                             <span className="text-xs text-white opacity-90">{pad.sounds.length} Sounds</span>
-                            {/* Optional: Carousel Dots for multiple sounds */}
+                            {/* Optional: Carousel Dots for multiple sounds indicator */}
                             {/* <div className="flex space-x-1 mt-1">
                                 {pad.sounds.map((s, idx) => (
                                 <div key={idx} className={`w-1.5 h-1.5 rounded-full ${s.color.replace('bg-','border-').replace('-500','-300')} border opacity-80`}></div>
                                 ))}
                             </div> */}
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="bg-background text-foreground text-xs p-2">
+                        <TooltipContent side="top" className="bg-background text-foreground text-xs p-2 max-w-[150px]">
                             <ul className="list-none p-0 m-0 space-y-1">
                                 {pad.sounds.map((s) => (
                                     <li key={s.soundId} className="flex items-center">
-                                        <div className={`w-3 h-3 rounded-sm mr-2 ${s.color}`}></div>
-                                        {s.soundName}
+                                        <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
+                                        <span className="truncate">{s.soundName}</span>
                                     </li>
                                 ))}
                             </ul>
@@ -423,32 +465,48 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   onTouchEnd={() => handlePadTouchEnd(pad.id)}
                   className={cn(
                     "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95",
-                    bgColorClass,
+                    bgColorClass, // Dynamic background based on state and sounds
                     borderColorClass,
-                    isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
-                    selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
-                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '',
-                    "opacity-0 animate-wave-fall",
+                    isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50', // Style for active vs inactive pads
+                    selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '', // Highlight selected pad
+                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105' : '', // Highlight playing beat
+                    "opacity-0 animate-wave-fall", // Apply animation
                   )}
-                   style={{ animationDelay: delay }}
-                  aria-label={`Pad ${pad.id + 1}. Status: ${pad.isActive ? (pad.sounds.length > 0 ? `${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}` : 'Active, no sound') : 'Inactive'}. Long press to change sound${pad.sounds.length > 1 ? 's' : ''}.`}
+                   style={{ animationDelay: delay }} // Stagger animation
+                  aria-label={`Pad ${pad.id + 1}. Status: ${pad.isActive ? (pad.sounds.length > 0 ? `${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}` : 'Active, no sound') : 'Inactive'}. Short press to toggle activity. Long press to change sound${pad.sounds.length > 1 ? 's' : ''}.`}
                 >
-                  {padContent()}
+                  {padContent()} {/* Render the appropriate content */}
                 </button>
               );
             })}
           </div>
+           {/* Playback and Sound Controls */}
            <div className="flex justify-between items-center space-x-4">
+             {/* Left side: Playback controls */}
              <div className="flex items-center space-x-2">
-               <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
-                 {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-               </Button>
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
+                      {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                    </Button>
+                 </TooltipTrigger>
+                 <TooltipContent>
+                   <p>{isPlaying ? "Pause" : "Play"}</p>
+                 </TooltipContent>
+               </Tooltip>
 
                <Popover>
                   <PopoverTrigger asChild>
-                     <Button variant="ghost" size="icon" aria-label="Playback Settings">
-                       <Settings2 className="h-5 w-5" />
-                     </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label="Playback Settings">
+                              <Settings2 className="h-5 w-5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>Playback Settings</p>
+                        </TooltipContent>
+                    </Tooltip>
                   </PopoverTrigger>
                   <PopoverContent className="w-48 p-4">
                      <div className="grid gap-4">
@@ -473,23 +531,39 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                      </div>
                   </PopoverContent>
                 </Popover>
-               <span className="text-sm text-muted-foreground tabular-nums">{bpm} BPM</span>
+               <span className="text-sm text-muted-foreground tabular-nums w-16 text-center">{bpm} BPM</span>
              </div>
 
+             {/* Right side: Sound selection/recording */}
              <div className="flex items-center space-x-2">
-                <Button variant="outline" size="sm" onClick={handleUploadClick}>
-                   <Upload className="mr-2 h-4 w-4" />
-                   Sounds
-                 </Button>
-                 <Button
-                   variant="outline"
-                   size="sm"
-                   onClick={handleRecordClick}
-                   disabled // Disable until implemented
-                 >
-                   <Mic className="mr-2 h-4 w-4" />
-                   Record
-                 </Button>
+                 <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button variant="outline" size="sm" onClick={handleUploadClick}>
+                           <Upload className="mr-2 h-4 w-4" />
+                           Sounds
+                         </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Open Sound Library</p>
+                        <p className="text-xs text-muted-foreground">(Long press a pad first)</p>
+                    </TooltipContent>
+                 </Tooltip>
+                 <Tooltip>
+                    <TooltipTrigger asChild>
+                         <Button
+                           variant="outline"
+                           size="sm"
+                           onClick={handleRecordClick}
+                           disabled // Disable until implemented
+                         >
+                           <Mic className="mr-2 h-4 w-4" />
+                           Record
+                         </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Live Recording (Coming Soon)</p>
+                    </TooltipContent>
+                 </Tooltip>
             </div>
           </div>
         </CardContent>
@@ -501,14 +575,17 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         </CardFooter>
       </Card>
 
+       {/* Sound Selection Sheet */}
        <SoundSelectionSheet
          isOpen={isSoundSheetOpen}
          onOpenChange={handleSheetOpenChange}
          onToggleSound={handleToggleSound} // Use the new handler
          selectedPadId={selectedPadId}
          currentPadSounds={currentSelectedPadData?.sounds || []} // Pass the array of sounds
-         allSounds={allSounds}
+         allSounds={allSounds} // Pass all available sounds
        />
      </TooltipProvider> // Close TooltipProvider
   );
 }
+
+    

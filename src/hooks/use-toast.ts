@@ -160,18 +160,20 @@ function toast({ ...props }: Toast) {
     })
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
-  dispatch({
-    type: "ADD_TOAST",
-    toast: {
-      ...props,
-      id,
-      open: true,
-      // onOpenChange is handled internally now by timeout/dismiss
-      // onOpenChange: (open) => {
-      //   if (!open) dismiss()
-      // },
-    },
-  })
+  // Use setTimeout to delay the dispatch slightly
+  // This avoids the warning about updating state during another component's render
+  setTimeout(() => {
+    dispatch({
+      type: "ADD_TOAST",
+      toast: {
+        ...props,
+        id,
+        open: true,
+        // onOpenChange is handled internally now by timeout/dismiss
+      },
+    })
+  }, 0);
+
 
   return {
     id: id,
@@ -201,3 +203,5 @@ function useToast() {
 }
 
 export { useToast, toast }
+
+    
