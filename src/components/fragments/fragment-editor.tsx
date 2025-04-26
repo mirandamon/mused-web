@@ -143,24 +143,18 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
       const pressDuration = Date.now() - touchStartTimeRef.current;
       if (pressDuration < LONG_PRESS_DURATION) {
           // Short press action: Toggle pad active state
-           let padStatusMessage = "";
            setPads(currentPads => {
               const updatedPads = currentPads.map(pad => {
                  if (pad.id === id) {
                      const newState = !pad.isActive;
-                     padStatusMessage = `Pad ${id + 1} ${newState ? 'Activated' : 'Deactivated'}`;
+                     // Removed toast notification for activation/deactivation
                      return { ...pad, isActive: newState };
                  }
                  return pad;
                });
                return updatedPads;
            });
-           if (padStatusMessage) {
-                // Wrap toast call in setTimeout to avoid state update during render
-                setTimeout(() => {
-                    toast({ title: padStatusMessage });
-                }, 0);
-           }
+           // Removed toast call
       }
     }
      touchStartTimeRef.current = 0; // Reset start time
@@ -228,8 +222,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         }, 0);
      }
 
-     // Note: Sheet closing is handled by the Sheet component itself via onOpenChange
-     // setIsSoundSheetOpen(false); // Do not close sheet automatically
+     // Do NOT close sheet automatically after toggling a sound
+     // setIsSoundSheetOpen(false);
    };
 
    // Update currentSelectedPadData whenever selectedPadId or pads change
@@ -256,7 +250,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   };
 
   const handleUploadClick = () => {
-     setSelectedPadId(null);
+     setSelectedPadId(null); // Clear selected pad before opening for generic sound browsing
      setCurrentSelectedPadData(null);
      setIsSoundSheetOpen(true);
      // Wrap toast call in setTimeout
@@ -616,4 +610,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   );
 }
 
-    
+
+
+
