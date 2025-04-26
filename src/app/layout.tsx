@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'BeatFlow',
+  title: 'Mused', // Updated app title
   description: 'Create, share, and remix musical fragments.',
 };
 

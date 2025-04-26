@@ -4,7 +4,8 @@ export type SoundSource = 'prerecorded' | 'live';
 
 export interface Pad {
   id: number;
-  sound?: string; // URL or identifier for the sound
+  sound?: string; // Name or identifier for the sound
+  soundUrl?: string; // Optional: URL for playback
   source?: SoundSource;
   isActive: boolean;
 }
@@ -27,4 +28,14 @@ export interface Fragment {
   title?: string; // Optional title for the fragment
   originalAuthor?: string; // If it's a remix
   originalFragmentId?: string; // If it's a remix
+}
+
+// New Type for Sounds
+export interface Sound {
+  id: string;
+  name: string;
+  type: 'preset' | 'marketplace';
+  author?: string; // For marketplace sounds
+  previewUrl?: string; // Optional URL for sound preview
+  patternStyle?: string; // Optional class for background pattern/animation
 }

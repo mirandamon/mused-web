@@ -104,6 +104,17 @@ export default {
             "0%": { opacity: "0", transform: "scale(.95)" },
             "100%": { opacity: "1", transform: "scale(1)" },
           },
+          // Keyframes for animated gradient background
+          "gradient-xy": {
+            '0%, 100%': {
+              'background-size': '400% 400%',
+              'background-position': 'left center'
+            },
+            '50%': {
+              'background-size': '200% 200%',
+              'background-position': 'right center'
+            }
+          },
   		},
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
@@ -111,9 +122,11 @@ export default {
          // Use the new keyframes in animation utilities
          "fade-in": "fade-in 0.3s ease-out",
          "zoom-in-95": "zoom-in-95 0.3s ease-out",
+         // Animation utility for gradient
+         "gradient-xy": 'gradient-xy 15s ease infinite',
+         "gradient-xy-slow": 'gradient-xy 25s ease infinite', // Slower version
   		}
   	}
   },
   plugins: [require("tailwindcss-animate")],
 } satisfies Config;
-

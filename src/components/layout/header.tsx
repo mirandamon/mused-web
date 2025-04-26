@@ -8,7 +8,7 @@ export default function Header() {
       <div className="container flex h-14 items-center">
         <Link href="/" className="mr-6 flex items-center space-x-2">
           <Music className="h-6 w-6 text-accent" />
-          <span className="font-bold">BeatFlow</span>
+          <span className="font-bold">Mused</span> {/* Updated app name */}
         </Link>
         <nav className="flex flex-1 items-center space-x-4">
           <Link href="/" passHref>
