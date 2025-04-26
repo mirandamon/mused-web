@@ -1,13 +1,15 @@
-// src/lib/types.ts
+{// src/lib/types.ts
 
 export type SoundSource = 'prerecorded' | 'live';
 
 export interface Pad {
   id: number;
   sound?: string; // Name or identifier for the sound
+  soundId?: string; // Unique ID of the sound
   soundUrl?: string; // Optional: URL for playback
   source?: SoundSource;
   isActive: boolean;
+  color?: string; // Assigned color class (e.g., 'bg-red-500')
 }
 
 export interface Comment {

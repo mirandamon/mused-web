@@ -1,3 +1,4 @@
+// src/app/remix/[id]/page.tsx
 'use client';
 
 import { useParams } from 'next/navigation';
@@ -39,7 +40,7 @@ export default function RemixFragmentPage() {
            <Skeleton className="h-8 w-3/4 mb-4" />
            <div className="grid grid-cols-4 gap-2 w-full aspect-square">
             {Array.from({ length: 16 }).map((_, i) => (
-              <Skeleton key={i} className="w-full h-full rounded-lg" />
+              <Skeleton key={i} className="w-full h-full rounded-lg bg-muted" /> // Use muted for skeleton
             ))}
           </div>
           <Skeleton className="h-10 w-1/4 mt-4" />
@@ -55,7 +56,12 @@ export default function RemixFragmentPage() {
   return (
     <div className="flex flex-col items-center">
       <h1 className="text-3xl font-bold mb-8">Remixing: {originalFragment.title || `Fragment by ${originalFragment.author}`}</h1>
-      <FragmentEditor initialPads={originalFragment.pads} originalAuthor={originalFragment.author} originalFragmentId={originalFragment.id}/>
+      {/* Pass the full pads data including color */}
+      <FragmentEditor
+         initialPads={originalFragment.pads}
+         originalAuthor={originalFragment.author}
+         originalFragmentId={originalFragment.id}
+      />
     </div>
   );
 }

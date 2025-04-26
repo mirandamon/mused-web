@@ -1,3 +1,4 @@
+// src/components/fragments/fragment-post.tsx
 'use client';
 
 import Link from 'next/link';
@@ -11,7 +12,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { useToast } from "@/hooks/use-toast"; // Import useToast
+import { useToast } from "@/hooks/use-toast";
 
 interface FragmentPostProps {
   fragment: Fragment;
@@ -25,7 +26,7 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
   const [comments, setComments] = useState<Comment[]>(fragment.comments);
   const [likeCount, setLikeCount] = useState(fragment.likes);
 
-  const { toast } = useToast(); // Initialize toast
+  const { toast } = useToast();
 
   const handleLike = () => {
     // TODO: Implement actual like logic (Server Action)
@@ -89,25 +90,32 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
          </Button>
       </CardHeader>
 
-      {/* Placeholder for visual representation of the fragment */}
+      {/* Visual representation of the fragment */}
       <CardContent className="p-0 aspect-square bg-secondary/30 flex items-center justify-center">
-        {/* Simple grid visualization */}
          <div className="grid grid-cols-4 gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto">
-           {fragment.pads.map(pad => (
-             <div
-               key={pad.id}
-               className={cn(
-                 "w-full h-full rounded transition-colors duration-300",
-                 pad.isActive ? 'bg-accent/70' : 'bg-muted/50'
-               )}
-                style={{ animation: isPlaying && pad.isActive ? `pulse 1s infinite ${pad.id * 0.05}s` : 'none' }} // Simple pulse animation
-             />
-           ))}
+           {fragment.pads.map(pad => {
+             // Use the pad's color if active and color exists, otherwise use muted
+             const bgColorClass = pad.isActive && pad.color ? pad.color : 'bg-muted/50';
+             const opacityClass = pad.isActive && pad.color ? 'opacity-70' : 'opacity-100'; // Make colored pads slightly transparent?
+
+             return (
+               <div
+                 key={pad.id}
+                 className={cn(
+                   "w-full h-full rounded transition-colors duration-300",
+                   bgColorClass,
+                   opacityClass // Apply opacity
+                 )}
+                 // Apply pulse animation only if playing and the pad is active with a color
+                 style={{ animation: isPlaying && pad.isActive && pad.color ? `pulse 1s infinite ${pad.id * 0.05}s` : 'none' }}
+               />
+             );
+           })}
          </div>
          <style jsx>{`
            @keyframes pulse {
-             0%, 100% { opacity: 0.7; }
-             50% { opacity: 1; transform: scale(1.05); }
+             0%, 100% { opacity: 0.6; transform: scale(1); } /* Start/end slightly faded */
+             50% { opacity: 0.9; transform: scale(1.05); } /* Pulse brighter and slightly larger */
            }
          `}</style>
       </CardContent>
