@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+   // Ensure experimental features are correctly configured if needed
+   // For Geist font, ensure fontLoaders configuration if required by older Next versions,
+   // but usually handled automatically with App Router.
 };
 
 export default nextConfig;
+
+     

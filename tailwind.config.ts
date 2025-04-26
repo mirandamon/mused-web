@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+const { fontFamily } = require("tailwindcss/defaultTheme")
 
 export default {
     darkMode: ["class"],
@@ -8,7 +9,18 @@ export default {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
+    container: { // Add container settings
+        center: true,
+        padding: "2rem",
+        screens: {
+            "2xl": "1400px",
+        },
+    },
   	extend: {
+      fontFamily: { // Add font family
+        sans: ["var(--font-geist-sans)", ...fontFamily.sans],
+        mono: ["var(--font-geist-mono)", ...fontFamily.mono],
+      },
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -82,13 +94,26 @@ export default {
   				to: {
   					height: '0'
   				}
-  			}
+  			},
+         // Add fade-in and zoom-in keyframes for subtle animations
+         "fade-in": {
+            "0%": { opacity: "0" },
+            "100%": { opacity: "1" },
+          },
+          "zoom-in-95": {
+            "0%": { opacity: "0", transform: "scale(.95)" },
+            "100%": { opacity: "1", transform: "scale(1)" },
+          },
   		},
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
-  			'accordion-up': 'accordion-up 0.2s ease-out'
+  			'accordion-up': 'accordion-up 0.2s ease-out',
+         // Use the new keyframes in animation utilities
+         "fade-in": "fade-in 0.3s ease-out",
+         "zoom-in-95": "zoom-in-95 0.3s ease-out",
   		}
   	}
   },
   plugins: [require("tailwindcss-animate")],
 } satisfies Config;
+

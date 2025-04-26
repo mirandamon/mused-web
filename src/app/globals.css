@@ -3,78 +3,86 @@
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    /* Light Theme - BeatFlow Palette */
+    --background: 220 13% 95%; /* Light Gray */
+    --foreground: 220 40% 15%; /* Dark Navy Blue */
+    --card: 220 13% 100%; /* White for cards */
+    --card-foreground: 220 40% 15%; /* Dark Navy Blue */
+    --popover: 220 13% 100%; /* White */
+    --popover-foreground: 220 40% 15%; /* Dark Navy Blue */
+    --primary: 220 40% 15%; /* Dark Navy Blue */
+    --primary-foreground: 0 0% 98%; /* Almost White */
+    --secondary: 220 13% 91%; /* Slightly darker gray */
+    --secondary-foreground: 220 40% 15%; /* Dark Navy Blue */
+    --muted: 220 13% 91%; /* Slightly darker gray */
+    --muted-foreground: 220 40% 45%; /* Lighter Navy Blue */
+    --accent: 25 95% 55%; /* Orange */
+    --accent-foreground: 0 0% 100%; /* White for text on accent */
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --border: 220 13% 88%; /* Lighter border */
+    --input: 220 13% 88%; /* Lighter input border */
+    --ring: 25 95% 55%; /* Orange for focus rings */
+    --chart-1: 25 95% 55%; /* Orange */
+    --chart-2: 220 40% 50%; /* Mid Navy Blue */
+    --chart-3: 220 40% 30%; /* Darker Navy Blue */
+    --chart-4: 35 90% 65%; /* Lighter Orange */
+    --chart-5: 210 30% 70%; /* Lighter Blue */
     --radius: 0.5rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Sidebar specific vars (can adjust if sidebar is used) */
+    --sidebar-background: 220 13% 98%;
+    --sidebar-foreground: 220 40% 15%;
+    --sidebar-primary: 25 95% 55%; /* Orange */
+    --sidebar-primary-foreground: 0 0% 100%; /* White */
+    --sidebar-accent: 220 13% 91%;
+    --sidebar-accent-foreground: 220 40% 15%;
+    --sidebar-border: 220 13% 88%;
+    --sidebar-ring: 25 95% 55%; /* Orange */
   }
+
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    /* Dark Theme - BeatFlow Palette */
+    --background: 220 40% 10%; /* Very Dark Navy Blue */
+    --foreground: 220 13% 95%; /* Light Gray */
+    --card: 220 40% 15%; /* Dark Navy Blue */
+    --card-foreground: 220 13% 95%; /* Light Gray */
+    --popover: 220 40% 15%; /* Dark Navy Blue */
+    --popover-foreground: 220 13% 95%; /* Light Gray */
+    --primary: 220 13% 95%; /* Light Gray */
+    --primary-foreground: 220 40% 15%; /* Dark Navy Blue */
+    --secondary: 220 40% 20%; /* Slightly lighter Navy Blue */
+    --secondary-foreground: 220 13% 95%; /* Light Gray */
+    --muted: 220 40% 20%; /* Slightly lighter Navy Blue */
+    --muted-foreground: 220 13% 65%; /* Mid Gray */
+    --accent: 25 95% 55%; /* Orange */
+    --accent-foreground: 220 40% 15%; /* Dark Navy Blue for text on accent */
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --border: 220 40% 25%; /* Darker border */
+    --input: 220 40% 25%; /* Darker input border */
+    --ring: 25 95% 55%; /* Orange for focus rings */
+    --chart-1: 25 95% 55%; /* Orange */
+    --chart-2: 220 13% 70%; /* Mid Gray */
+    --chart-3: 220 13% 50%; /* Darker Gray */
+    --chart-4: 35 90% 65%; /* Lighter Orange */
+    --chart-5: 210 13% 80%; /* Lighter Gray */
+    --radius: 0.5rem;
+
+    /* Sidebar specific vars (can adjust if sidebar is used) */
+    --sidebar-background: 220 40% 15%;
+    --sidebar-foreground: 220 13% 95%;
+    --sidebar-primary: 25 95% 55%; /* Orange */
+    --sidebar-primary-foreground: 220 40% 15%; /* Dark Navy Blue */
+    --sidebar-accent: 220 40% 20%;
+    --sidebar-accent-foreground: 220 13% 95%;
+    --sidebar-border: 220 40% 25%;
+    --sidebar-ring: 25 95% 55%; /* Orange */
   }
 }
 
