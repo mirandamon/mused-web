@@ -1,8 +1,10 @@
 // src/lib/placeholder-data.ts
-import type { Fragment, Pad, PadSound } from './types';
-import { presetSounds, marketplaceSounds } from './placeholder-sounds';
+import type { Fragment, Pad, PadSound, Sound } from './types';
+import { presetSounds } from './placeholder-sounds'; // Removed marketplaceSounds import
 
-const allSounds = [...presetSounds, ...marketplaceSounds];
+// Only use preset sounds for initial static data population.
+// API sounds will be fetched separately in the component.
+const allStaticSounds: Sound[] = [...presetSounds];
 
 const colorPalette: string[] = [
   'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
@@ -39,14 +41,26 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
     if (soundInput) { // Process sounds regardless of initial isActive status
       const soundIds = Array.isArray(soundInput) ? soundInput : [soundInput];
       soundIds.forEach(soundId => {
-        const sound = allSounds.find(s => s.id === soundId);
+        // Look for the sound in the static presets first
+        const sound = allStaticSounds.find(s => s.id === soundId);
         if (sound) {
           const color = getSoundColor(soundId);
           padSounds.push({
             soundId: soundId,
             soundName: sound.name,
-            soundUrl: sound.previewUrl,
-            source: sound.type === 'preset' ? 'prerecorded' : 'prerecorded',
+            soundUrl: sound.previewUrl || sound.source_url, // Use available URL
+            source: sound.type === 'preset' ? 'predefined' : sound.source_type || 'uploaded', // Map type/source
+            color: color,
+          });
+        } else {
+          // If not found in presets, create a placeholder entry for API/marketplace sounds
+          // This assumes the sound will be fetched later or is just a placeholder ID
+          const color = getSoundColor(soundId);
+          padSounds.push({
+            soundId: soundId,
+            soundName: soundId.replace('mkt-', '').replace('-', ' ').replace('preset-', '') || 'Market Sound', // Generate a fallback name
+            soundUrl: undefined, // API will provide URL
+            source: 'uploaded', // Assume marketplace sounds are 'uploaded' or similar
             color: color,
           });
         }

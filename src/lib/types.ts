@@ -1,6 +1,6 @@
 // src/lib/types.ts
 
-export type SoundSource = 'prerecorded' | 'live';
+export type SoundSource = 'prerecorded' | 'live' | 'uploaded' | 'predefined'; // Added API types
 
 // Interface for storing information about a single sound assigned to a pad
 export interface PadSound {
@@ -16,7 +16,6 @@ export interface Pad {
   sounds: PadSound[]; // Array to hold multiple sounds
   isActive: boolean; // A pad is active if it has at least one sound and is toggled on
   currentSoundIndex?: number; // Index of the sound currently displayed/focused in case of multiple sounds
-  // Removed single sound properties: sound?, soundId?, soundUrl?, source?, color?
 }
 
 export interface Comment {
@@ -40,13 +39,17 @@ export interface Fragment {
   originalFragmentId?: string; // If it's a remix
 }
 
-// Type for Sounds in the library/marketplace remains the same
+// Updated Sound type to better match API and frontend usage
 export interface Sound {
   id: string;
   name: string;
-  type: 'preset' | 'marketplace';
-  author?: string; // For marketplace sounds
-  previewUrl?: string; // Optional URL for sound preview
+  type: 'preset' | 'marketplace' | 'recorded' | 'uploaded' | 'predefined'; // More specific type based on source_type or frontend context
+  owner_user_id?: string; // From API
+  source_type?: SoundSource; // From API
+  source_url?: string; // From API (can be preview or actual sound)
+  created_at?: string; // From API (ISO string)
+  author?: string; // For marketplace/API sounds (derived from owner_user_id)
+  previewUrl?: string; // Explicit preview URL (potentially same as source_url)
   patternStyle?: string; // Optional class for background pattern/animation
 }
 

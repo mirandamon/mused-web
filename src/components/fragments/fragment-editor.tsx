@@ -7,12 +7,12 @@ import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Music2, Mic, Upload, Check, Play, Pause, Settings2, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
-import SoundSelectionSheet from './sound-selection-sheet';
+import SoundSelectionSheetWrapper from './sound-selection-sheet'; // Updated import
 import type { Pad, PadSound, Sound } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { presetSounds, marketplaceSounds } from '@/lib/placeholder-sounds';
+import { presetSounds } from '@/lib/placeholder-sounds'; // Keep preset sounds static
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 
@@ -51,8 +51,8 @@ const getRandomColor = (availableColorsPool: string[]): string => {
     return availableColorsPool.splice(randomIndex, 1)[0];
 };
 
-// Combine sounds for easier lookup
-const allSounds: Sound[] = [...presetSounds, ...marketplaceSounds];
+// Combine sounds for easier lookup - NO LONGER NEEDED HERE as marketplace sounds are fetched
+// const allSounds: Sound[] = [...presetSounds, ...marketplaceSounds];
 
 export default function FragmentEditor({ initialPads: rawInitialPads, originalAuthor, originalFragmentId }: FragmentEditorProps) {
   const [pads, setPads] = useState<Pad[]>(defaultPads);
@@ -106,7 +106,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
             }
 
             // Add the sound with its determined color
-             const fullSound = allSounds.find(s => s.id === padSound.soundId);
+             // Attempt to find full sound info in presets (marketplace info fetched later)
+             const fullSound = presetSounds.find(s => s.id === padSound.soundId);
             processedSounds.push({
                 ...padSound,
                 soundName: padSound.soundName || fullSound?.name || 'Unknown', // Ensure name exists
@@ -157,9 +158,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            setPads(currentPads => {
               const updatedPads = currentPads.map(pad => {
                  if (pad.id === id) {
-                     // Toggle only if it has sounds or is already active
-                     // const newState = (pad.sounds.length > 0 || pad.isActive) ? !pad.isActive : false;
-                     // Let's always allow toggling isActive, visual state will handle display
                      const newState = !pad.isActive;
                      return { ...pad, isActive: newState };
                  }
@@ -172,7 +170,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      // Reset timing and swipe flags regardless
      touchStartTimeRef.current = 0;
      // Don't reset swipeHandledRef here, let the next mousedown/touchstart do it
-     // swipeHandledRef.current = false;
   };
 
    const handlePadTouchStart = (id: number, event: React.TouchEvent<HTMLButtonElement>) => {
@@ -195,7 +192,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              setPads(currentPads => {
                 const updatedPads = currentPads.map(pad => {
                    if (pad.id === id) {
-                       // Always allow toggling isActive.
                        const newState = !pad.isActive;
                        return { ...pad, isActive: newState };
                    }
@@ -309,8 +305,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            const newPadSound: PadSound = {
              soundId: sound.id,
              soundName: sound.name,
-             soundUrl: sound.previewUrl,
-             source: sound.type === 'preset' ? 'prerecorded' : 'prerecorded', // Placeholder
+             soundUrl: sound.previewUrl || sound.source_url, // Use previewUrl or source_url
+             source: sound.source_type || sound.type, // Use source_type or derived type
              color: assignedColor!,
            };
            newSounds = [...pad.sounds, newPadSound];
@@ -360,10 +356,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   };
 
   const handleUploadClick = () => {
-     // User clicks "Sounds" button - intended to OPEN the sheet, not necessarily assign.
-     // Don't require a pad to be selected first.
-     // setSelectedPadId(null); // Keep selectedPadId if already long-pressed
-     // setCurrentSelectedPadData(null);
+     // User clicks "Sounds" button - opens the sheet.
      setIsSoundSheetOpen(true);
      // Toast if no pad is selected via long-press yet
      if (selectedPadId === null) {
@@ -451,8 +444,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
+      // Removed toast
     } else {
       startPlayback();
+      // Removed toast
     }
   };
 
@@ -492,16 +487,15 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         <CardContent className="p-4 md:p-6">
           <div className="grid grid-cols-4 gap-2 md:gap-3 aspect-square mb-6">
             {pads.map((pad) => {
-              const isPadActive = pad.isActive; // Active state is now independent of having sounds
+              const isPadActive = pad.isActive;
               const hasSounds = pad.sounds.length > 0;
               const currentSoundIndex = pad.currentSoundIndex ?? 0;
               const currentSound = hasSounds ? pad.sounds[currentSoundIndex] : null;
 
-              // Determine background color based on the *currently selected* sound in multi-sound pads
               const bgColorClass = isPadActive && currentSound
-                ? currentSound.color // Use color of current sound if active and sound exists
-                : isPadActive ? 'bg-secondary/70' // Active but no sound (e.g., preparing to assign)
-                : 'bg-secondary'; // Inactive
+                ? currentSound.color
+                : isPadActive ? 'bg-secondary/70'
+                : 'bg-secondary';
 
               const borderColorClass = isPadActive ? 'border-transparent' : 'border-border/50';
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
@@ -518,16 +512,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                            key={idx}
                            className={cn(
                               "rounded-full transition-all duration-300 ease-out",
-                              // Active dot is larger, filled white, with border matching sound color
                               idx === currentSoundIndex
                                 ? `w-2 h-2 opacity-100 bg-white border-2`
-                                : `w-1.5 h-1.5 opacity-60 bg-transparent border`, // Inactive dots smaller, transparent bg
-                              idx === currentSoundIndex ? s.color.replace('bg-','border-') : s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400') // Border color from sound
+                                : `w-1.5 h-1.5 opacity-60 bg-transparent border`,
+                              idx === currentSoundIndex ? s.color.replace('bg-','border-') : s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400')
                            )}
                            style={{
-                             // Use inline style for dynamic border color based on the sound's color class
-                             borderColor: idx === currentSoundIndex ? `var(--color-${s.color.split('-')[1]})` : `var(--color-${s.color.split('-')[1]}-muted)`, // Crude way to get color name - needs refinement
-                             // Transform scale for active dot
+                             borderColor: idx === currentSoundIndex ? `var(--color-${s.color.split('-')[1]})` : `var(--color-${s.color.split('-')[1]}-muted)`,
                              transform: idx === currentSoundIndex ? 'scale(1.1)' : 'scale(1)',
                            }}
                          />
@@ -537,17 +528,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
                  // --- Pad State Visuals ---
                  if (!isPadActive) {
-                    // Inactive pad: faint dot in the center
                     return <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>;
                  }
                  if (!hasSounds) {
-                     // Active but no sounds: pulsing dot indicating readiness
                      return <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-3 h-3 rounded-full bg-primary/40 animate-pulse"></div></div>;
                  }
 
-                 // Active pad with sound(s): Show current sound info and dots if multiple
-                 const soundToDisplay = currentSound; // This is the sound at currentSoundIndex
-                 if (!soundToDisplay) return null; // Should not happen if hasSounds is true
+                 const soundToDisplay = currentSound;
+                 if (!soundToDisplay) return null;
 
                  const soundIcon = soundToDisplay.source === 'live' ? Mic : Music2;
                  const soundName = soundToDisplay.soundName;
@@ -593,20 +581,20 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   key={pad.id}
                   onMouseDown={() => handlePadMouseDown(pad.id)}
                   onMouseUp={() => handlePadMouseUp(pad.id)}
-                  onMouseLeave={() => handlePadMouseLeave(pad.id)} // Pass pad.id
+                  onMouseLeave={() => handlePadMouseLeave(pad.id)}
                   onTouchStart={(e) => handlePadTouchStart(pad.id, e)}
-                  onTouchEnd={() => handlePadTouchEnd(pad.id)} // Pass pad.id
-                  onTouchMove={handlePadTouchMove} // Add touch move handler for swipe
+                  onTouchEnd={() => handlePadTouchEnd(pad.id)}
+                  onTouchMove={handlePadTouchMove}
                   className={cn(
                     "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95 cursor-pointer",
-                    "touch-pan-y", // Allow vertical scroll, prevent horizontal page scroll during swipe
+                    "touch-pan-y",
                     bgColorClass,
                     borderColorClass,
                     isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
-                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '', // Ensure current beat is on top
-                    "opacity-0 animate-wave-fall", // Initial animation
-                    "overflow-hidden" // Crucial for containing content and animations
+                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '',
+                    "opacity-0 animate-wave-fall",
+                    "overflow-hidden"
                   )}
                    style={{ animationDelay: delay }}
                    aria-label={`Pad ${pad.id + 1}. Status: ${
@@ -683,7 +671,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              <div className="flex items-center space-x-2">
                  <Tooltip>
                     <TooltipTrigger asChild>
-                        {/* Changed Upload icon to Layers for multi-sound context */}
                         <Button variant="outline" size="sm" onClick={handleUploadClick}>
                            <Layers className="mr-2 h-4 w-4" />
                            Sounds
@@ -722,13 +709,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
       </Card>
 
        {/* Sound Selection Sheet */}
-       <SoundSelectionSheet
+       <SoundSelectionSheetWrapper
          isOpen={isSoundSheetOpen}
          onOpenChange={handleSheetOpenChange}
          onToggleSound={handleToggleSound}
          selectedPadId={selectedPadId}
          currentPadSounds={currentSelectedPadData?.sounds || []}
-         allSounds={allSounds}
+         // allSounds prop removed - fetched inside the sheet component
        />
      </TooltipProvider>
   );
