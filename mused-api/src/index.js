@@ -15,7 +15,7 @@ app.use(express.json()); // Parse JSON request bodies
 
 // Routes
 app.get('/', (req, res) => {
-    res.send('Mused Sounds API is running!');
+    res.send('Mused API is running!');
 });
 
 app.use('/api/sounds', soundsRouter);
@@ -28,5 +28,5 @@ app.use((err, req, res, next) => {
 
 // Start Server
 app.listen(port, () => {
-    console.log(`Sounds API server listening on port ${port}`);
+    console.log(`Mused API server listening on port ${port}`);
 });

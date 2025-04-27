@@ -1,6 +1,6 @@
-# Mused Sounds API
+# Mused API
 
-This Node.js application provides an API endpoint to fetch sounds metadata from the Firestore database for the Mused project.
+This Node.js application provides API endpoints for the Mused project, initially focusing on fetching sounds metadata from Firestore.
 
 ## Setup
 

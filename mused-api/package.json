@@ -1,7 +1,7 @@
 {
-  "name": "sounds-api",
+  "name": "mused-api",
   "version": "1.0.0",
-  "description": "API for fetching sounds from Firestore",
+  "description": "API for the Mused application",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
