@@ -39,34 +39,34 @@ const defaultPads: Pad[] = Array.from({ length: 16 }, (_, i) => ({
   currentSoundIndex: 0, // Initialize index
 }));
 
-// Helper function to get a random color from the palette
-const getRandomColor = (availableColorsPool: string[]): string => {
-    if (availableColorsPool.length === 0) {
-        console.warn("Color palette exhausted, reusing colors.");
-        // Simple reset, could be improved
-        availableColorsPool.push(...colorPalette);
-    }
-    const randomIndex = Math.floor(Math.random() * availableColorsPool.length);
-    return availableColorsPool.splice(randomIndex, 1)[0];
-};
-
 // Global map to track assigned colors for sound IDs to ensure consistency
 const globalSoundColorMap = new Map<string, string>();
 // Global pool of available colors
-const globalAvailableColorsPool = [...colorPalette];
+let globalAvailableColorsPool = [...colorPalette];
+
+// Helper function to get a random color from the palette
+const getRandomColor = (): string => {
+    if (globalAvailableColorsPool.length === 0) {
+        console.warn("Color palette exhausted, reusing colors.");
+        // Simple reset, could be improved
+        globalAvailableColorsPool = [...colorPalette];
+    }
+    const randomIndex = Math.floor(Math.random() * globalAvailableColorsPool.length);
+    return globalAvailableColorsPool[randomIndex]; // Don't remove, just pick
+};
 
 // Helper to get or assign a consistent color for a sound ID
-const getOrAssignSoundColor = (soundId: string): string => {
+export const getOrAssignSoundColor = (soundId: string): string => {
     if (globalSoundColorMap.has(soundId)) {
         return globalSoundColorMap.get(soundId)!; // Return existing color
     } else {
         // Assign a new color
         if (globalAvailableColorsPool.length === 0) {
             console.warn("Color palette exhausted, reusing colors.");
-            globalAvailableColorsPool.push(...colorPalette); // Reset pool
+            globalAvailableColorsPool = [...colorPalette]; // Reset pool
         }
-        const randomIndex = Math.floor(Math.random() * globalAvailableColorsPool.length);
-        const newColor = globalAvailableColorsPool.splice(randomIndex, 1)[0];
+        // Select a random color but don't remove it from the pool permanently
+        const newColor = getRandomColor();
         globalSoundColorMap.set(soundId, newColor); // Store the assignment globally
         return newColor;
     }
@@ -113,11 +113,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                console.log("AudioContext initialized.");
            } catch (e) {
                console.error("Web Audio API is not supported in this browser.", e);
-               toast({
-                   variant: "destructive",
-                   title: "Audio Error",
-                   description: "Your browser doesn't support the necessary audio features.",
-               });
+               // Use setTimeout to avoid state update during render error
+               setTimeout(() => {
+                 toast({
+                     variant: "destructive",
+                     title: "Audio Error",
+                     description: "Your browser doesn't support the necessary audio features.",
+                 });
+               }, 0);
            }
        }
        // Ensure cleanup on unmount
@@ -143,8 +146,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                    return {
                        ...padSound,
                        soundName: padSound.soundName || fullSound?.name || 'Unknown',
-                       soundUrl: padSound.soundUrl, // Keep original path
-                       downloadUrl: padSound.downloadUrl, // Keep playable URL
+                       soundUrl: padSound.soundUrl, // Keep original path (might be gs:// or relative)
+                       downloadUrl: padSound.downloadUrl, // Keep playable URL (should be http/https)
                        color: assignedColor, // Apply consistent color
                    };
                });
@@ -163,61 +166,73 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   // --- Audio Loading ---
    const loadAudio = useCallback(async (url: string): Promise<AudioBuffer | null> => {
       if (!audioContextRef.current || !url) return null;
-      if (audioBuffersRef.current[url]) return audioBuffersRef.current[url]; // Return cached buffer
+      // Use the URL itself as the key for caching
+      if (audioBuffersRef.current[url]) return audioBuffersRef.current[url];
 
-      // Determine the correct URL to fetch (handle relative vs absolute)
+      // Check if the URL is a valid HTTP/HTTPS URL
       let fetchUrl = url;
-      if (url.startsWith('/') && typeof window !== 'undefined') {
-          // For relative URLs (preset sounds), construct the full URL based on the current origin.
-          // This relies on the Next.js rewrite/proxy in development.
-          fetchUrl = window.location.origin + url;
-      } else if (!url.startsWith('http')) {
-           console.error(`Editor: Invalid audio URL format: ${url}`);
-           toast({
-               variant: "destructive",
-               title: "Audio Load Error",
-               description: `Invalid sound URL format.`,
-           });
-           return null; // Skip invalid formats
+      if (!url.startsWith('http')) {
+          // If it's a relative path (like preset sounds), construct the full URL
+          if (url.startsWith('/') && typeof window !== 'undefined') {
+              fetchUrl = window.location.origin + url;
+          } else {
+              // If it's not HTTP and not a relative path starting with '/', it's likely an invalid format (e.g., gs://)
+              console.error(`Editor: Invalid audio URL format: ${url}`);
+              setTimeout(() => { // Use setTimeout to avoid updating state during render
+                  toast({
+                      variant: "destructive",
+                      title: "Audio Load Error",
+                      description: `Invalid sound URL format for ${url.split('/').pop() || 'Unknown sound'}. Cannot load.`,
+                  });
+              }, 0);
+              return null; // Cannot fetch this URL
+          }
       }
 
-      console.log(`Editor: Attempting to load audio from: ${fetchUrl}`); // Log the actual fetch URL
+      console.log(`Editor: Attempting to load audio from: ${fetchUrl}`);
       try {
           const response = await fetch(fetchUrl);
           if (!response.ok) {
-               console.error(`Editor: HTTP error! status: ${response.status} for URL ${fetchUrl}`);
+              console.error(`Editor: HTTP error! status: ${response.status} for URL ${fetchUrl}`);
               throw new Error(`HTTP error! status: ${response.status}`);
           }
           const arrayBuffer = await response.arrayBuffer();
           const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-          audioBuffersRef.current[url] = audioBuffer; // Cache the buffer using original URL as key
+          audioBuffersRef.current[url] = audioBuffer; // Cache the buffer using the original valid URL as key
           console.log(`Editor: Audio loaded and decoded successfully: ${url}`);
           return audioBuffer;
       } catch (error) {
           console.error(`Editor: Error loading or decoding audio file ${url} (fetching from ${fetchUrl}):`, error);
           setTimeout(() => { // Use setTimeout to avoid updating state during render
-             toast({
-                variant: "destructive",
-                title: "Audio Load Error",
-                description: `Could not load sound: ${url.split('/').pop()?.split('?')[0] || 'Unknown sound'}.`,
-             });
+              toast({
+                  variant: "destructive",
+                  title: "Audio Load Error",
+                  description: `Could not load sound: ${url.split('/').pop()?.split('?')[0] || 'Unknown sound'}.`,
+              });
           }, 0);
           return null;
       }
    // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, []); // Remove toast from dependency array
-
+   }, []); // Removed toast from dependency array
 
    // Preload sounds when pads data changes
    useEffect(() => {
        pads.forEach(pad => {
            pad.sounds.forEach(sound => {
-               // Use downloadUrl primarily, fallback to soundUrl if needed
-               const urlToLoad = sound.downloadUrl || sound.soundUrl;
+               // *** CRITICAL: Always prioritize downloadUrl for loading ***
+               const urlToLoad = sound.downloadUrl;
                if (urlToLoad) {
-                   loadAudio(urlToLoad); // Start loading, don't need to await here
+                   loadAudio(urlToLoad); // Start loading using the playable URL
+               } else if (sound.soundUrl && sound.soundUrl.startsWith('/')) {
+                   // Fallback for preset sounds if downloadUrl is missing but soundUrl is relative
+                   loadAudio(sound.soundUrl);
                } else {
-                   // console.warn(`Pad ${pad.id}, Sound ${sound.soundName} has no playable URL.`);
+                  // Log if no playable URL is found, don't attempt to load invalid formats
+                  if (sound.soundUrl && !sound.soundUrl.startsWith('http') && !sound.soundUrl.startsWith('/')) {
+                    // console.warn(`Pad ${pad.id}, Sound ${sound.soundName}: Invalid soundUrl format (${sound.soundUrl}), cannot preload.`);
+                  } else if (!sound.soundUrl) {
+                    // console.warn(`Pad ${pad.id}, Sound ${sound.soundName}: Missing playable URL (downloadUrl).`);
+                  }
                }
            });
        });
@@ -283,10 +298,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           const pad = pads.find(p => p.id === id);
            if (pad?.isActive && pad.sounds.length > 0) {
                const soundToPlay = pad.sounds[pad.currentSoundIndex ?? 0];
-               // Use downloadUrl primarily, fallback to soundUrl
-               const urlToPlay = soundToPlay?.downloadUrl || soundToPlay?.soundUrl;
+               // *** CRITICAL: Always prioritize downloadUrl for playback ***
+               const urlToPlay = soundToPlay?.downloadUrl;
                if (urlToPlay) {
-                   const buffer = audioBuffersRef.current[urlToPlay];
+                   const buffer = audioBuffersRef.current[urlToPlay]; // Use downloadUrl as cache key
                    if (buffer) {
                        playSound(buffer);
                    } else {
@@ -294,6 +309,16 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                            if (loadedBuffer) playSound(loadedBuffer);
                        });
                    }
+               } else {
+                 // Fallback for preset sounds if downloadUrl missing
+                 const fallbackUrl = soundToPlay?.soundUrl;
+                 if (fallbackUrl && fallbackUrl.startsWith('/')) {
+                    const buffer = audioBuffersRef.current[fallbackUrl];
+                    if (buffer) playSound(buffer);
+                    else loadAudio(fallbackUrl).then(b => b && playSound(b));
+                 } else {
+                    console.warn(`Pad ${id}: No playable URL found for sound ${soundToPlay?.soundName}`);
+                 }
                }
            }
       }
@@ -323,10 +348,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              const pad = pads.find(p => p.id === id);
               if (pad?.isActive && pad.sounds.length > 0) {
                   const soundToPlay = pad.sounds[pad.currentSoundIndex ?? 0];
-                  // Use downloadUrl primarily, fallback to soundUrl
-                  const urlToPlay = soundToPlay?.downloadUrl || soundToPlay?.soundUrl;
+                  // *** CRITICAL: Always prioritize downloadUrl for playback ***
+                  const urlToPlay = soundToPlay?.downloadUrl;
                   if (urlToPlay) {
-                      const buffer = audioBuffersRef.current[urlToPlay];
+                      const buffer = audioBuffersRef.current[urlToPlay]; // Use downloadUrl as cache key
                       if (buffer) {
                           playSound(buffer);
                       } else {
@@ -334,6 +359,16 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                               if (loadedBuffer) playSound(loadedBuffer);
                           });
                       }
+                  } else {
+                     // Fallback for preset sounds if downloadUrl missing
+                     const fallbackUrl = soundToPlay?.soundUrl;
+                     if (fallbackUrl && fallbackUrl.startsWith('/')) {
+                         const buffer = audioBuffersRef.current[fallbackUrl];
+                         if (buffer) playSound(buffer);
+                         else loadAudio(fallbackUrl).then(b => b && playSound(b));
+                     } else {
+                         console.warn(`Pad ${id} (touch): No playable URL found for sound ${soundToPlay?.soundName}`);
+                     }
                   }
               }
         }
@@ -379,7 +414,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              } else if (newIndex >= pad.sounds.length) {
                newIndex = 0;
              }
-             console.log(`Swipe detected on Pad ${padId}. Direction: ${direction > 0 ? 'Right (Prev)' : 'Left (Next)'}. New Index: ${newIndex}`);
+             // console.log(`Swipe detected on Pad ${padId}. Direction: ${direction > 0 ? 'Right (Prev)' : 'Left (Next)'}. New Index: ${newIndex}`);
              return { ...pad, currentSoundIndex: newIndex };
            }
            return pad; // Return unchanged pad if it's not the one being swiped or has <= 1 sound
@@ -439,8 +474,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            const newPadSound: PadSound = {
              soundId: sound.id,
              soundName: sound.name,
-             soundUrl: sound.source_url, // Store original path
-             downloadUrl: sound.downloadUrl || sound.previewUrl, // Store playable URL
+             // *** CRITICAL: Store BOTH URLs ***
+             soundUrl: sound.source_url, // Store original path (e.g., gs:// or relative)
+             downloadUrl: sound.downloadUrl || sound.previewUrl, // Store playable URL (http/https)
              source: sound.source_type || sound.type, // Use source_type or derived type
              color: assignedColor!, // Use the determined color
            };
@@ -448,10 +484,15 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            newCurrentIndex = newSounds.length - 1; // Focus the newly added sound
            toastMessage = `${sound.name} added to Pad ${selectedPadId + 1}.`;
 
-           // Preload the newly added sound
-           if (newPadSound.downloadUrl || newPadSound.soundUrl) {
-              const urlToLoad = newPadSound.downloadUrl || newPadSound.soundUrl;
-              if (urlToLoad) loadAudio(urlToLoad);
+           // Preload the newly added sound using the playable URL
+           const urlToLoad = newPadSound.downloadUrl; // Prioritize downloadUrl
+           if (urlToLoad) {
+              loadAudio(urlToLoad);
+           } else if (newPadSound.soundUrl && newPadSound.soundUrl.startsWith('/')) {
+              // Fallback for presets if downloadUrl is missing
+              loadAudio(newPadSound.soundUrl);
+           } else {
+              console.warn(`Added sound ${newPadSound.soundName} but no playable URL found.`);
            }
          }
 
@@ -579,11 +620,11 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
              const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
-             // Use downloadUrl primarily, fallback to soundUrl
-             const urlToPlay = soundToPlay?.downloadUrl || soundToPlay?.soundUrl;
+             // *** CRITICAL: Always prioritize downloadUrl for playback ***
+             const urlToPlay = soundToPlay?.downloadUrl;
 
              if (urlToPlay) {
-                const buffer = audioBuffersRef.current[urlToPlay];
+                const buffer = audioBuffersRef.current[urlToPlay]; // Use downloadUrl as cache key
                 if (buffer) {
                    playSound(buffer);
                 } else {
@@ -595,7 +636,15 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                     });
                 }
              } else {
-                // console.log(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No playable URL`);
+                 // Fallback for preset sounds if downloadUrl missing
+                 const fallbackUrl = soundToPlay?.soundUrl;
+                 if (fallbackUrl && fallbackUrl.startsWith('/')) {
+                     const buffer = audioBuffersRef.current[fallbackUrl];
+                     if (buffer) playSound(buffer);
+                     else loadAudio(fallbackUrl).then(b => b && playSound(b));
+                 } else {
+                     // console.log(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No playable URL`);
+                 }
              }
         }
         return nextBeat; // Update the current beat for the next interval
@@ -649,18 +698,19 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         <CardContent className="p-4 md:p-6">
           <div className="grid grid-cols-4 gap-2 md:gap-3 aspect-square mb-6">
             {pads.map((pad) => {
-              const isPadActive = pad.isActive;
               const hasSounds = pad.sounds.length > 0;
+              // Use isActive toggle state for visual dimming, but color comes from sound
+              const isPadUIToggledActive = pad.isActive;
               const currentSoundIndex = pad.currentSoundIndex ?? 0;
               const currentSound = hasSounds ? pad.sounds[currentSoundIndex] : null;
 
               // Use the CONSISTENT color from the CURRENTLY selected sound for the pad background
-              const bgColorClass = isPadActive && currentSound
+              const bgColorClass = currentSound
                 ? currentSound.color // Use the sound's assigned color
-                : isPadActive ? 'bg-secondary/70' // Pad active but somehow no current sound (shouldn't happen ideally)
-                : 'bg-secondary'; // Pad inactive
+                : hasSounds ? 'bg-secondary/70' // Pad has sounds but somehow no current sound
+                : 'bg-secondary'; // Pad has no sounds
 
-              const borderColorClass = isPadActive ? 'border-transparent' : 'border-border/50';
+              const borderColorClass = hasSounds ? 'border-transparent' : 'border-border/50';
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
               const row = Math.floor(pad.id / 4);
               const delay = `${row * 100}ms`; // Stagger animation
@@ -711,14 +761,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                  );
 
                  // --- Pad State Visuals ---
-                 // A pad is visually active if it has sounds, regardless of the isActive toggle
+                 // If no sounds, show placeholder
                  if (!hasSounds) {
                      return <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="w-3 h-3 rounded-full bg-muted-foreground/20"></div></div>;
                  }
                  // If pad has sounds but is toggled off (isActive=false)
-                 if (!isPadActive) {
+                 if (!isPadUIToggledActive) {
                       return (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center p-1 pt-5 text-white/50 overflow-hidden w-full h-full pointer-events-none bg-black/30 backdrop-blur-sm">
+                          <div className="absolute inset-0 flex flex-col items-center justify-center p-1 pt-5 text-white/50 overflow-hidden w-full h-full pointer-events-none bg-black/30 backdrop-blur-sm rounded-lg">
                              {dotsIndicator}
                              <Pause className="w-[45%] h-[45%] opacity-50 mb-0.5 flex-shrink-0" />
                              <span className="text-xs opacity-70 truncate w-full text-center mt-1">Inactive</span>
@@ -726,7 +776,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                       );
                  }
 
-                 // Pad is active and has sounds
+                 // Pad has sounds and is toggled ON
                  const soundToDisplay = currentSound;
                  if (!soundToDisplay) return null; // Should not happen if hasSounds is true
 
@@ -780,9 +830,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   onTouchEnd={() => handlePadTouchEnd(pad.id)}
                   onTouchMove={handlePadTouchMove}
                    onClick={() => {
-                      // Toggle isActive state on short click
+                      // Toggle isActive state on short click IF pad has sounds
                        const pressDuration = Date.now() - touchStartTimeRef.current;
-                       if (!swipeHandledRef.current && pressDuration < LONG_PRESS_DURATION) {
+                       if (!swipeHandledRef.current && pressDuration < LONG_PRESS_DURATION && hasSounds) {
                          setPads(currentPads =>
                            currentPads.map(p =>
                              p.id === pad.id ? { ...p, isActive: !p.isActive } : p
@@ -797,16 +847,16 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                     borderColorClass,
                     hasSounds ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50', // Shadow if sounds exist
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
-                    isCurrentBeat && isPadActive ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '', // Highlight only if active
+                    isCurrentBeat && isPadUIToggledActive ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '', // Highlight only if toggled active
                     "opacity-0 animate-wave-fall",
-                    "overflow-hidden"
+                    "overflow-hidden" // Needed for absolute positioned overlays/dots
                   )}
                    style={{ animationDelay: delay }}
                    aria-label={`Pad ${pad.id + 1}. Status: ${
                       hasSounds
-                        ? `${isPadActive ? 'Active' : 'Inactive'}, ${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}. Current: ${currentSound?.soundName || 'None'}`
+                        ? `${isPadUIToggledActive ? 'Active' : 'Inactive'}, ${pad.sounds.length} sound${pad.sounds.length > 1 ? 's' : ''}. Current: ${currentSound?.soundName || 'None'}`
                         : 'No sounds'
-                    }. Short press to toggle activity. Long press to manage sounds.${
+                    }. Short press to ${hasSounds ? 'toggle activity' : 'do nothing'}. Long press to manage sounds.${
                       pad.sounds.length > 1 ? ' Swipe left/right to cycle sounds.' : ''
                     }`}
                 >
@@ -934,4 +984,3 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      </TooltipProvider>
   );
 }
-
