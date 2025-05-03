@@ -97,7 +97,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
                     // Determine the color: Use provided valid color or assign a random one
                     if (!assignedColor || !colorPalette.includes(assignedColor)) {
-                        assignedColor = getRandomColor(localAvailableColors); // Assign random if invalid/missing
+                        // Ensure getRandomColor uses the local pool for initialization consistency
+                        assignedColor = getRandomColor(localAvailableColors);
                     } else {
                         // Valid color provided, remove it from the local pool if present
                         const colorIndex = localAvailableColors.indexOf(assignedColor);
@@ -118,6 +119,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      };
 
      const initialColorMap = buildInitialColorMap();
+     // Set the initial state for the sound color map
+     setSoundColorMap(initialColorMap);
 
      // Second pass: Process pads using the consistent color map
      const processedPads = (rawInitialPads || defaultPads).map(rawPad => {
@@ -144,7 +147,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      });
 
      setPads(processedPads);
-     setSoundColorMap(initialColorMap); // Set the component's state map
+     // soundColorMap state is set above
 
    }, [rawInitialPads]); // Rerun only if rawInitialPads changes
 
@@ -295,6 +298,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      if (selectedPadId === null) return;
 
      let toastMessage = ""; // Define toastMessage outside setPads
+     let wasAdded = false; // Flag to track if the sound was added (for color map update)
+     let assignedColor: string | undefined; // Store the assigned color
 
      setPads(currentPads => {
        const updatedPads = currentPads.map(pad => {
@@ -316,12 +321,15 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            }
          } else {
            // Sound doesn't exist, add it
-           let assignedColor = soundColorMap[sound.id];
+           wasAdded = true; // Mark that we are adding the sound
+           // Determine the color *before* creating the PadSound object
+           assignedColor = soundColorMap[sound.id]; // Check if color already exists in the map
            if (!assignedColor) {
+             // Assign a new color only if it doesn't exist
              assignedColor = getRandomColor(availableColorsRef.current);
-             // Update the global color map state directly
-             setSoundColorMap(prevMap => ({ ...prevMap, [sound.id]: assignedColor! }));
+             // Note: We update the soundColorMap state *after* this setPads call
            }
+
            const newPadSound: PadSound = {
              soundId: sound.id,
              soundName: sound.name,
@@ -341,6 +349,12 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        });
        return updatedPads; // Return the full updated pads array
      });
+
+     // Update the global color map state only if a new sound was added *and* a color was newly assigned
+     if (wasAdded && assignedColor && !soundColorMap[sound.id]) {
+        setSoundColorMap(prevMap => ({ ...prevMap, [sound.id]: assignedColor! }));
+     }
+
 
      // Show toast *after* the state update has been queued
      if (toastMessage) {
@@ -512,10 +526,11 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
               const currentSoundIndex = pad.currentSoundIndex ?? 0;
               const currentSound = hasSounds ? pad.sounds[currentSoundIndex] : null;
 
+              // Use the CONSISTENT color from the CURRENTLY selected sound for the pad background
               const bgColorClass = isPadActive && currentSound
                 ? currentSound.color // Use the sound's assigned color
-                : isPadActive ? 'bg-secondary/70'
-                : 'bg-secondary';
+                : isPadActive ? 'bg-secondary/70' // Pad active but somehow no current sound (shouldn't happen ideally)
+                : 'bg-secondary'; // Pad inactive
 
               const borderColorClass = isPadActive ? 'border-transparent' : 'border-border/50';
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
@@ -527,23 +542,43 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                  // --- Dots Indicator for multiple sounds ---
                  const dotsIndicator = pad.sounds.length > 1 && (
                     <div className="absolute top-1.5 left-0 right-0 flex justify-center items-center space-x-1 pointer-events-none z-10">
-                       {pad.sounds.map((s, idx) => (
-                         <div
-                           key={idx}
-                           className={cn(
-                              "rounded-full transition-all duration-300 ease-out",
-                              idx === currentSoundIndex
-                                ? `w-2 h-2 opacity-100 bg-white border-2`
-                                : `w-1.5 h-1.5 opacity-60 bg-transparent border`,
-                              idx === currentSoundIndex ? s.color.replace('bg-','border-') : s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400')
-                           )}
-                           style={{
-                             // Dynamic border color based on the sound's assigned color
-                             borderColor: idx === currentSoundIndex ? `var(--color-${s.color.split('-')[1]})` : `var(--color-${s.color.split('-')[1]}-muted)`,
-                             transform: idx === currentSoundIndex ? 'scale(1.1)' : 'scale(1)',
-                           }}
-                         />
-                       ))}
+                       {pad.sounds.map((s, idx) => {
+                         // Determine border color dynamically based on the sound's assigned color
+                         // Using inline style as Tailwind class generation might be complex/limited
+                         const soundColorValue = s.color.match(/bg-([a-z]+)-(\d+)/); // Extract color name and shade
+                         let borderColorStyle = {};
+                         if (soundColorValue) {
+                             // Simple mapping, could be more sophisticated
+                             const shade = parseInt(soundColorValue[2], 10);
+                             const borderShade = idx === currentSoundIndex ? Math.min(900, shade + 100) : Math.max(300, shade - 100);
+                             // Construct CSS variable name if using CSS vars, or apply directly if not
+                             // Example assuming CSS vars like --color-red-700 exist
+                             // borderColorStyle = { borderColor: `hsl(var(--${soundColorValue[1]}-${borderShade}))` };
+                             // Direct Tailwind color usage for simplicity here (might need adjustments):
+                             const borderClass = `border-${soundColorValue[1]}-${borderShade}`;
+                             // Using inline style with placeholder value if dynamic class doesn't work
+                             borderColorStyle = { borderColor: 'currentColor' }; // Placeholder
+
+                         }
+
+                         return (
+                           <div
+                             key={idx}
+                             className={cn(
+                               "rounded-full transition-all duration-300 ease-out",
+                               idx === currentSoundIndex
+                                 ? `w-2 h-2 opacity-100 bg-white border-2` // Active dot
+                                 : `w-1.5 h-1.5 opacity-60 bg-transparent border`, // Inactive dot
+                               // Apply border color class dynamically if possible, otherwise rely on inline style
+                               // s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400') // Example attempt
+                             )}
+                             style={{
+                               ...borderColorStyle, // Apply dynamic border color
+                               transform: idx === currentSoundIndex ? 'scale(1.1)' : 'scale(1)',
+                             }}
+                           />
+                         );
+                       })}
                      </div>
                  );
 
@@ -582,6 +617,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                                    <ul className="list-none p-0 m-0 space-y-1 ">
                                        {pad.sounds.map((s, idx) => (
                                            <li key={s.soundId} className={cn("flex items-center", idx === currentSoundIndex ? "font-semibold" : "")}>
+                                               {/* Use the sound's own color for the square */}
                                                <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
                                                <span className="truncate">{s.soundName}</span>
                                            </li>
@@ -609,7 +645,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   className={cn(
                     "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95 cursor-pointer",
                     "touch-pan-y", // Allow vertical scrolling, disable horizontal panning on pad
-                    bgColorClass,
+                    bgColorClass, // Apply the background color based on the *current* sound
                     borderColorClass,
                     isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '',
