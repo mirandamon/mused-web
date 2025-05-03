@@ -82,52 +82,71 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
    // Initialize pads and color map from initialPads prop
    useEffect(() => {
-     const initialColorMap: { [soundId: string]: string } = {};
-     const processedPads = (rawInitialPads || defaultPads).map(rawPad => {
-        const processedSounds: PadSound[] = [];
-        (rawPad.sounds || []).forEach(padSound => {
-            if (!padSound.soundId) return; // Skip if no soundId
+     // First pass: Build a consistent color map for all unique sound IDs in initialPads
+     const buildInitialColorMap = (): { [soundId: string]: string } => {
+        const map: { [soundId: string]: string } = {};
+        // Use a local copy of the palette for this build phase to avoid mutating the ref prematurely
+        const localAvailableColors = [...availableColorsRef.current];
 
-            let color = padSound.color; // Use provided color if exists
-            if (initialColorMap[padSound.soundId]) {
-                // If this soundId already has a color assigned in this init run, use it
-                color = initialColorMap[padSound.soundId];
-            } else if (!color || !colorPalette.includes(color)) {
-                // If no valid color provided AND no color assigned yet, pick a new one
-                color = getRandomColor(availableColorsRef.current);
-                initialColorMap[padSound.soundId] = color; // Store the new assignment
-            } else {
-                // If a valid color *was* provided and not yet assigned, store it and remove from pool
-                initialColorMap[padSound.soundId] = color;
-                const colorIndex = availableColorsRef.current.indexOf(color);
-                if (colorIndex > -1) {
-                    availableColorsRef.current.splice(colorIndex, 1);
+        (rawInitialPads || []).forEach(rawPad => {
+            (rawPad.sounds || []).forEach(padSound => {
+                if (!padSound.soundId) return;
+
+                if (!map[padSound.soundId]) { // If this sound ID hasn't been assigned a color yet
+                    let assignedColor = padSound.color; // Check if a valid color was provided in the input
+
+                    // Determine the color: Use provided valid color or assign a random one
+                    if (!assignedColor || !colorPalette.includes(assignedColor)) {
+                        assignedColor = getRandomColor(localAvailableColors); // Assign random if invalid/missing
+                    } else {
+                        // Valid color provided, remove it from the local pool if present
+                        const colorIndex = localAvailableColors.indexOf(assignedColor);
+                        if (colorIndex > -1) {
+                            localAvailableColors.splice(colorIndex, 1);
+                        }
+                    }
+                    map[padSound.soundId] = assignedColor; // Assign the final determined color to the map
                 }
-            }
-
-            // Add the sound with its determined color
-             // Attempt to find full sound info in presets (marketplace info fetched later)
-             const fullSound = presetSounds.find(s => s.id === padSound.soundId);
-            processedSounds.push({
-                ...padSound,
-                soundName: padSound.soundName || fullSound?.name || 'Unknown', // Ensure name exists
-                color: color!, // Ensure color is assigned
+                // If map[padSound.soundId] already exists, we intentionally do nothing,
+                // ensuring the *first* encountered valid or assigned random color is used consistently.
             });
         });
+
+        // Update the main available colors ref *after* the map is built
+        availableColorsRef.current = localAvailableColors;
+        return map;
+     };
+
+     const initialColorMap = buildInitialColorMap();
+
+     // Second pass: Process pads using the consistent color map
+     const processedPads = (rawInitialPads || defaultPads).map(rawPad => {
+        const processedSounds: PadSound[] = (rawPad.sounds || [])
+            .filter(ps => ps.soundId) // Ensure soundId exists
+            .map(padSound => {
+                const assignedColor = initialColorMap[padSound.soundId!]; // Get the consistent color from the map
+                // Attempt to find full sound info in presets for name fallback
+                const fullSound = presetSounds.find(s => s.id === padSound.soundId);
+                return {
+                    ...padSound,
+                    soundName: padSound.soundName || fullSound?.name || 'Unknown', // Ensure name exists
+                    color: assignedColor, // Apply the consistent color
+                };
+            });
 
         // Update rawPad with processed sounds and derive isActive state
         return {
             ...rawPad,
             sounds: processedSounds,
-            // A pad is active if isActive is explicitly true OR it has sounds.
             isActive: rawPad.isActive || processedSounds.length > 0,
-            currentSoundIndex: rawPad.currentSoundIndex ?? 0, // Initialize index
+            currentSoundIndex: rawPad.currentSoundIndex ?? 0, // Ensure index is initialized
         };
      });
 
      setPads(processedPads);
-     setSoundColorMap(initialColorMap);
-   }, [rawInitialPads]);
+     setSoundColorMap(initialColorMap); // Set the component's state map
+
+   }, [rawInitialPads]); // Rerun only if rawInitialPads changes
 
 
   const handlePadMouseDown = (id: number) => {
@@ -300,6 +319,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            let assignedColor = soundColorMap[sound.id];
            if (!assignedColor) {
              assignedColor = getRandomColor(availableColorsRef.current);
+             // Update the global color map state directly
              setSoundColorMap(prevMap => ({ ...prevMap, [sound.id]: assignedColor! }));
            }
            const newPadSound: PadSound = {
@@ -307,7 +327,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              soundName: sound.name,
              soundUrl: sound.previewUrl || sound.source_url, // Use previewUrl or source_url
              source: sound.source_type || sound.type, // Use source_type or derived type
-             color: assignedColor!,
+             color: assignedColor!, // Use the determined color
            };
            newSounds = [...pad.sounds, newPadSound];
            newCurrentIndex = newSounds.length - 1; // Focus the newly added sound
@@ -493,7 +513,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
               const currentSound = hasSounds ? pad.sounds[currentSoundIndex] : null;
 
               const bgColorClass = isPadActive && currentSound
-                ? currentSound.color
+                ? currentSound.color // Use the sound's assigned color
                 : isPadActive ? 'bg-secondary/70'
                 : 'bg-secondary';
 
@@ -518,6 +538,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                               idx === currentSoundIndex ? s.color.replace('bg-','border-') : s.color.replace('bg-','border-').replace('-500','-300').replace('-600','-400')
                            )}
                            style={{
+                             // Dynamic border color based on the sound's assigned color
                              borderColor: idx === currentSoundIndex ? `var(--color-${s.color.split('-')[1]})` : `var(--color-${s.color.split('-')[1]}-muted)`,
                              transform: idx === currentSoundIndex ? 'scale(1.1)' : 'scale(1)',
                            }}
@@ -587,7 +608,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   onTouchMove={handlePadTouchMove}
                   className={cn(
                     "relative w-full h-full rounded-lg border-2 transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 active:scale-95 cursor-pointer",
-                    "touch-pan-y",
+                    "touch-pan-y", // Allow vertical scrolling, disable horizontal panning on pad
                     bgColorClass,
                     borderColorClass,
                     isPadActive ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50',
