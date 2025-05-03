@@ -6,7 +6,8 @@ export type SoundSource = 'prerecorded' | 'live' | 'uploaded' | 'predefined'; //
 export interface PadSound {
   soundId: string;
   soundName: string; // Store name directly for easier access
-  soundUrl?: string;
+  soundUrl?: string; // Original source path (e.g., from Firestore)
+  downloadUrl?: string; // Playable URL (e.g., signed URL from Storage)
   source?: SoundSource;
   color: string; // Color associated with this specific soundId
 }
@@ -46,10 +47,11 @@ export interface Sound {
   type: 'preset' | 'marketplace' | 'recorded' | 'uploaded' | 'predefined'; // More specific type based on source_type or frontend context
   owner_user_id?: string; // From API
   source_type?: SoundSource; // From API
-  source_url?: string; // From API (can be preview or actual sound)
+  source_url?: string; // From API (Storage path)
+  downloadUrl?: string; // From API (Signed download URL)
   created_at?: string; // From API (ISO string)
   author?: string; // For marketplace/API sounds (derived from owner_user_id)
-  previewUrl?: string; // Explicit preview URL (potentially same as source_url)
+  previewUrl?: string; // Explicit preview URL (potentially same as downloadUrl or source_url)
   patternStyle?: string; // Optional class for background pattern/animation
 }
 

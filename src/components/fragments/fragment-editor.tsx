@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Music2, Mic, Upload, Check, Play, Pause, Settings2, Layers } from 'lucide-react';
+import { Music2, Mic, Upload, Check, Play, Pause, Settings2, Layers, Volume2, VolumeX } from 'lucide-react'; // Added Volume icons
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import SoundSelectionSheetWrapper from './sound-selection-sheet'; // Updated import
@@ -14,7 +14,6 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { presetSounds } from '@/lib/placeholder-sounds'; // Keep preset sounds static
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-
 
 // Define a palette of Tailwind background color classes
 const colorPalette: string[] = [
@@ -51,8 +50,6 @@ const getRandomColor = (availableColorsPool: string[]): string => {
     return availableColorsPool.splice(randomIndex, 1)[0];
 };
 
-// Combine sounds for easier lookup - NO LONGER NEEDED HERE as marketplace sounds are fetched
-// const allSounds: Sound[] = [...presetSounds, ...marketplaceSounds];
 
 export default function FragmentEditor({ initialPads: rawInitialPads, originalAuthor, originalFragmentId }: FragmentEditorProps) {
   const [pads, setPads] = useState<Pad[]>(defaultPads);
@@ -71,14 +68,50 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const currentSwipingPadIdRef = useRef<number | null>(null); // Track which pad is being swiped
   const swipeHandledRef = useRef<boolean>(false); // Flag to prevent click after swipe
 
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
   const [bpm, setBpm] = useState<number>(120);
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // --- Web Audio API State ---
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioBuffersRef = useRef<{ [url: string]: AudioBuffer }>({}); // Cache decoded audio buffers
+  const isAudioContextInitialized = useRef(false);
+  const [isMuted, setIsMuted] = useState(false); // Mute state
+  const gainNodeRef = useRef<GainNode | null>(null); // Gain node for volume control
+
   const LONG_PRESS_DURATION = 500; // milliseconds
   const SWIPE_THRESHOLD = 30; // Reduced threshold for better sensitivity
+
+   // Initialize Audio Context safely on the client
+   useEffect(() => {
+       if (typeof window !== 'undefined' && !isAudioContextInitialized.current) {
+           try {
+               audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+               gainNodeRef.current = audioContextRef.current.createGain();
+               gainNodeRef.current.connect(audioContextRef.current.destination);
+               isAudioContextInitialized.current = true;
+               console.log("AudioContext initialized.");
+           } catch (e) {
+               console.error("Web Audio API is not supported in this browser.", e);
+               toast({
+                   variant: "destructive",
+                   title: "Audio Error",
+                   description: "Your browser doesn't support the necessary audio features.",
+               });
+           }
+       }
+       // Ensure cleanup on unmount
+       return () => {
+           if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+               audioContextRef.current.close().catch(console.error);
+               isAudioContextInitialized.current = false;
+               console.log("AudioContext closed.");
+           }
+       };
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, []); // Run only once on mount
+
 
    // Initialize pads and color map from initialPads prop
    useEffect(() => {
@@ -133,6 +166,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                 return {
                     ...padSound,
                     soundName: padSound.soundName || fullSound?.name || 'Unknown', // Ensure name exists
+                    soundUrl: padSound.soundUrl, // Keep the original path
+                    downloadUrl: padSound.downloadUrl, // Keep the playable URL
                     color: assignedColor, // Apply the consistent color
                 };
             });
@@ -150,6 +185,78 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      // soundColorMap state is set above
 
    }, [rawInitialPads]); // Rerun only if rawInitialPads changes
+
+
+  // --- Audio Loading ---
+   const loadAudio = useCallback(async (url: string): Promise<AudioBuffer | null> => {
+      if (!audioContextRef.current || !url) return null;
+      if (audioBuffersRef.current[url]) return audioBuffersRef.current[url]; // Return cached buffer
+
+      console.log(`Attempting to load audio from: ${url}`);
+      try {
+          const response = await fetch(url);
+          if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+          audioBuffersRef.current[url] = audioBuffer; // Cache the buffer
+          console.log(`Audio loaded and decoded successfully: ${url}`);
+          return audioBuffer;
+      } catch (error) {
+          console.error(`Error loading or decoding audio file ${url}:`, error);
+          toast({
+             variant: "destructive",
+             title: "Audio Load Error",
+             description: `Could not load sound: ${url.split('/').pop()?.split('?')[0] || 'Unknown sound'}.`,
+          });
+          return null;
+      }
+   }, [toast]); // Include toast in dependencies
+
+   // Preload sounds when pads data changes
+   useEffect(() => {
+       pads.forEach(pad => {
+           pad.sounds.forEach(sound => {
+               if (sound.downloadUrl) {
+                   loadAudio(sound.downloadUrl); // Start loading, don't need to await here
+               } else {
+                   // console.warn(`Pad ${pad.id}, Sound ${sound.soundName} has no downloadUrl.`);
+               }
+           });
+       });
+   }, [pads, loadAudio]);
+
+
+   // --- Audio Playback ---
+   const playSound = useCallback((buffer: AudioBuffer) => {
+       if (!audioContextRef.current || !gainNodeRef.current || isMuted) return;
+
+       // Resume context if suspended (required by browser policy)
+       if (audioContextRef.current.state === 'suspended') {
+           audioContextRef.current.resume();
+       }
+
+       const source = audioContextRef.current.createBufferSource();
+       source.buffer = buffer;
+       source.connect(gainNodeRef.current); // Connect to gain node instead of destination
+       source.start(0);
+   }, [isMuted]); // Depend on isMuted state
+
+   const handleToggleMute = () => {
+       setIsMuted(prevMuted => {
+           const newMuted = !prevMuted;
+           if (gainNodeRef.current && audioContextRef.current) {
+               // Use exponential ramp for smoother transition
+               gainNodeRef.current.gain.exponentialRampToValueAtTime(
+                   newMuted ? 0.0001 : 1.0, // Target near zero for mute
+                   audioContextRef.current.currentTime + 0.1 // Ramp over 0.1 seconds
+               );
+               console.log(newMuted ? "Audio Muted" : "Audio Unmuted");
+           }
+           return newMuted;
+       });
+   };
 
 
   const handlePadMouseDown = (id: number) => {
@@ -333,13 +440,19 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            const newPadSound: PadSound = {
              soundId: sound.id,
              soundName: sound.name,
-             soundUrl: sound.previewUrl || sound.source_url, // Use previewUrl or source_url
+             soundUrl: sound.source_url, // Store original path
+             downloadUrl: sound.downloadUrl || sound.previewUrl, // Store playable URL
              source: sound.source_type || sound.type, // Use source_type or derived type
              color: assignedColor!, // Use the determined color
            };
            newSounds = [...pad.sounds, newPadSound];
            newCurrentIndex = newSounds.length - 1; // Focus the newly added sound
            toastMessage = `${sound.name} added to Pad ${selectedPadId + 1}.`;
+
+           // Preload the newly added sound
+           if (newPadSound.downloadUrl) {
+             loadAudio(newPadSound.downloadUrl);
+           }
          }
 
          // Return the updated pad state
@@ -362,9 +475,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           toast({ title: "Sound Updated", description: toastMessage });
         }, 0);
      }
-
-     // Keep the sheet open for potential multiple changes
-     // setIsSoundSheetOpen(false); // Keep sheet open
    };
 
    // Update currentSelectedPadData whenever selectedPadId or pads change
@@ -451,6 +561,15 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   }, []);
 
   const startPlayback = useCallback(() => {
+     if (!audioContextRef.current) {
+        toast({ variant: "destructive", title: "Audio Error", description: "Audio context not initialized." });
+        return;
+     }
+      // Resume context if suspended (required by browser policy on user interaction)
+      if (audioContextRef.current.state === 'suspended') {
+           audioContextRef.current.resume();
+      }
+
     if (playbackIntervalRef.current) {
       clearInterval(playbackIntervalRef.current);
     }
@@ -465,23 +584,34 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
         const padToPlay = pads[nextBeat];
 
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-             // In a real app, play the audio for the sound at padToPlay.currentSoundIndex
              const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
-             console.log(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Playing Sound: ${soundToPlay?.soundName}`);
-             // Example: playAudio(soundToPlay.soundUrl);
+             if (soundToPlay?.downloadUrl) {
+                const buffer = audioBuffersRef.current[soundToPlay.downloadUrl];
+                if (buffer) {
+                   playSound(buffer);
+                } else {
+                    // Sound not loaded yet, attempt to load and play if successful
+                    // This might cause slight delay on first playback if not preloaded
+                    loadAudio(soundToPlay.downloadUrl).then(loadedBuffer => {
+                        if (loadedBuffer) playSound(loadedBuffer);
+                    });
+                    console.warn(`Sound buffer for ${soundToPlay.soundName} not found, attempting load.`);
+                }
+             } else {
+                // console.log(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No playable URL`);
+             }
         }
         return nextBeat; // Update the current beat for the next interval
       });
     }, beatDuration);
-  }, [bpm, pads]); // Dependencies: bpm and pads array
+  }, [bpm, pads, playSound, loadAudio, toast]); // Include toast
+
 
   const handlePlayPause = () => {
     if (isPlaying) {
       stopPlayback();
-      // Removed toast
     } else {
       startPlayback();
-      // Removed toast
     }
   };
 
@@ -673,6 +803,17 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            <div className="flex justify-between items-center space-x-4 mt-6">
              {/* Left side: Playback controls */}
              <div className="flex items-center space-x-2">
+                <Tooltip>
+                     <TooltipTrigger asChild>
+                         <Button variant="ghost" size="icon" onClick={handleToggleMute} aria-label={isMuted ? "Unmute" : "Mute"}>
+                             {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                         </Button>
+                     </TooltipTrigger>
+                     <TooltipContent>
+                         <p>{isMuted ? "Unmute" : "Mute"}</p>
+                     </TooltipContent>
+                </Tooltip>
+
                <Tooltip>
                  <TooltipTrigger asChild>
                     <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
@@ -777,3 +918,4 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
      </TooltipProvider>
   );
 }
+

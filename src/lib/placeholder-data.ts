@@ -48,7 +48,8 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
           padSounds.push({
             soundId: soundId,
             soundName: sound.name,
-            soundUrl: sound.previewUrl || sound.source_url, // Use available URL
+            soundUrl: sound.source_url, // Use source_url for the path
+            downloadUrl: sound.downloadUrl || sound.previewUrl, // Use downloadUrl or previewUrl for playback
             source: sound.type === 'preset' ? 'predefined' : sound.source_type || 'uploaded', // Map type/source
             color: color,
           });
@@ -59,7 +60,8 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
           padSounds.push({
             soundId: soundId,
             soundName: soundId.replace('mkt-', '').replace('-', ' ').replace('preset-', '') || 'Market Sound', // Generate a fallback name
-            soundUrl: undefined, // API will provide URL
+            soundUrl: undefined, // API will provide original path
+            downloadUrl: undefined, // API will provide playable URL
             source: 'uploaded', // Assume marketplace sounds are 'uploaded' or similar
             color: color,
           });

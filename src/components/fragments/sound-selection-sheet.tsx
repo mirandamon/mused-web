@@ -26,7 +26,7 @@ const queryClient = new QueryClient();
 
 // Define the structure of the API response
 interface SoundsApiResponse {
-    sounds: Sound[];
+    sounds: Sound[]; // API response includes downloadUrl now
     nextPageCursor: string | null;
 }
 
@@ -39,7 +39,7 @@ const fetchSounds = async (): Promise<Sound[]> => {
       throw new Error("API URL is not configured. Please set NEXT_PUBLIC_MUSED_API_URL.");
     }
 
-    // Ensure the endpoint path is just /sounds relative to the base API URL
+    // Ensure the endpoint path is /sounds relative to the base API URL
     const endpoint = `${apiUrl}/sounds?limit=50`; // TODO: Implement pagination later
 
     console.log(`Fetching sounds from: ${endpoint}`); // Log the URL being fetched
@@ -67,12 +67,13 @@ const fetchSounds = async (): Promise<Sound[]> => {
             id: apiSound.id, // Ensure ID is always present
             name: apiSound.name || 'Unnamed Sound', // Default name
             type: apiSound.source_type === 'predefined' ? 'preset' : 'marketplace', // Map source_type
-            previewUrl: apiSound.source_url || '', // Use source_url as previewUrl, default to empty string
+            previewUrl: apiSound.downloadUrl || apiSound.source_url || '', // Prioritize downloadUrl, then source_url
+            downloadUrl: apiSound.downloadUrl || '', // Store the playable URL
             author: apiSound.owner_user_id || 'Unknown', // Use owner_user_id as author
             // API specific fields
             owner_user_id: apiSound.owner_user_id,
             source_type: apiSound.source_type,
-            source_url: apiSound.source_url,
+            source_url: apiSound.source_url, // Keep original source path if needed
             created_at: apiSound.created_at,
             // Generate a placeholder patternStyle based on ID or type for visual variety
             patternStyle: generatePatternStyle(apiSound.id),

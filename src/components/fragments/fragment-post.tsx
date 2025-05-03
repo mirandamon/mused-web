@@ -6,8 +6,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Heart, MessageCircle, GitFork, Play, Pause, Layers } from 'lucide-react'; // Added Layers
-import type { Fragment, Comment } from '@/lib/types';
+import { Heart, MessageCircle, GitFork, Play, Pause, Layers, Volume2, VolumeX } from 'lucide-react'; // Added Layers, Volume icons
+import type { Fragment, Comment, PadSound } from '@/lib/types';
 import { formatDistanceToNow } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,6 +19,29 @@ interface FragmentPostProps {
   fragment: Fragment;
 }
 
+// Global map to cache audio buffers across different post components
+const globalAudioBuffers: { [url: string]: AudioBuffer } = {};
+// Global audio context (potentially shared, or manage per component instance)
+let globalAudioContext: AudioContext | null = null;
+let globalGainNode: GainNode | null = null;
+let isGlobalAudioContextInitialized = false;
+
+const initializeGlobalAudioContext = () => {
+    if (typeof window !== 'undefined' && !isGlobalAudioContextInitialized) {
+        try {
+            globalAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            globalGainNode = globalAudioContext.createGain();
+            globalGainNode.connect(globalAudioContext.destination);
+            isGlobalAudioContextInitialized = true;
+            console.log("Global AudioContext initialized.");
+        } catch (e) {
+            console.error("Web Audio API is not supported in this browser.", e);
+            // Potentially show a global error message once
+        }
+    }
+};
+
+
 export default function FragmentPost({ fragment }: FragmentPostProps) {
   const [isLiked, setIsLiked] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -27,9 +50,86 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
   const [comments, setComments] = useState<Comment[]>(fragment.comments);
   const [likeCount, setLikeCount] = useState(fragment.likes);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
+  const [isMuted, setIsMuted] = useState(false); // Mute state for this post
 
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
+
+  // Ensure global audio context is initialized on mount
+  useEffect(() => {
+     initializeGlobalAudioContext();
+     // Check initial mute state if global gain node exists
+     if (globalGainNode) {
+        setIsMuted(globalGainNode.gain.value < 0.5); // Approximate check
+     }
+  }, []);
+
+  // --- Audio Loading (uses global cache) ---
+  const loadAudio = useCallback(async (url: string): Promise<AudioBuffer | null> => {
+      if (!globalAudioContext || !url) return null;
+      if (globalAudioBuffers[url]) return globalAudioBuffers[url]; // Return cached buffer
+
+      console.log(`Post: Attempting to load audio from: ${url}`);
+      try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+          const arrayBuffer = await response.arrayBuffer();
+          const audioBuffer = await globalAudioContext.decodeAudioData(arrayBuffer);
+          globalAudioBuffers[url] = audioBuffer; // Cache globally
+          console.log(`Post: Audio loaded and decoded successfully: ${url}`);
+          return audioBuffer;
+      } catch (error) {
+          console.error(`Post: Error loading or decoding audio file ${url}:`, error);
+          // Avoid spamming toasts for every post if the same sound fails
+          // toast({ variant: "destructive", title: "Audio Load Error", description: `Could not load sound: ${url}` });
+          return null;
+      }
+  }, []);
+
+  // Preload sounds for this fragment when it becomes visible or data changes
+  useEffect(() => {
+      fragment.pads.forEach(pad => {
+          pad.sounds.forEach(sound => {
+              if (sound.downloadUrl) {
+                  loadAudio(sound.downloadUrl); // Start loading
+              }
+          });
+      });
+  }, [fragment.pads, loadAudio]);
+
+   // --- Audio Playback (uses global context/gain) ---
+   const playSound = useCallback((buffer: AudioBuffer) => {
+       if (!globalAudioContext || !globalGainNode) return;
+       if (globalGainNode.gain.value < 0.1) return; // Don't play if muted
+
+       if (globalAudioContext.state === 'suspended') {
+           globalAudioContext.resume();
+       }
+
+       const source = globalAudioContext.createBufferSource();
+       source.buffer = buffer;
+       source.connect(globalGainNode);
+       source.start(0);
+   }, []);
+
+   // --- Global Mute Control ---
+   const handleToggleMute = () => {
+       if (!globalAudioContext || !globalGainNode) return;
+
+       const currentGain = globalGainNode.gain.value;
+       const isCurrentlyMuted = currentGain < 0.5; // Check if effectively muted
+       const targetGain = isCurrentlyMuted ? 1.0 : 0.0001; // Target 1 for unmute, near 0 for mute
+       const newMutedState = !isCurrentlyMuted;
+
+       globalGainNode.gain.exponentialRampToValueAtTime(
+           targetGain,
+           globalAudioContext.currentTime + 0.1 // Ramp over 0.1 seconds
+       );
+
+       setIsMuted(newMutedState); // Update local state for UI icon
+       console.log(newMutedState ? "Global Audio Muted" : "Global Audio Unmuted");
+   };
+
 
   const handleLike = () => {
     setIsLiked(!isLiked);
@@ -51,6 +151,14 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
   }, []);
 
   const startPlayback = useCallback(() => {
+      if (!globalAudioContext) {
+          toast({ variant: "destructive", title: "Audio Error", description: "Audio context not initialized." });
+          return;
+      }
+      if (globalAudioContext.state === 'suspended') {
+           globalAudioContext.resume();
+      }
+
     if (playbackIntervalRef.current) {
       clearInterval(playbackIntervalRef.current);
     }
@@ -64,36 +172,40 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
       setCurrentBeat(prevBeat => {
         const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16;
         const padToPlay = fragment.pads[nextBeat];
+
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-             // TODO: Trigger actual sound playback for all sounds in padToPlay.sounds
-             // console.log(`Post Beat: ${nextBeat}, Sounds: ${padToPlay.sounds.map(s => s.soundName).join(', ')}`);
+            const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
+            if (soundToPlay?.downloadUrl) {
+               const buffer = globalAudioBuffers[soundToPlay.downloadUrl];
+               if (buffer) {
+                  playSound(buffer);
+               } else {
+                   // Attempt to load if not found (might be slightly delayed)
+                   loadAudio(soundToPlay.downloadUrl).then(loadedBuffer => {
+                       if (loadedBuffer) playSound(loadedBuffer);
+                   });
+               }
+            }
         }
         return nextBeat;
       });
     }, beatDuration);
-  }, [fragment.bpm, fragment.pads]); // Depend on fragment's bpm and pads
+  }, [fragment.bpm, fragment.pads, playSound, loadAudio, toast]); // Added toast
 
   const handlePlayPause = () => {
      if (isPlaying) {
        stopPlayback();
-       toast({
-         title: "Playback Paused",
-         description: `Paused ${fragment.author}'s fragment.`,
-       });
      } else {
        startPlayback();
-       toast({
-         title: "Playback Started",
-         description: `Playing ${fragment.author}'s fragment at ${fragment.bpm || 120} BPM.`,
-       });
      }
   };
 
   useEffect(() => {
+    // Cleanup interval on unmount or when fragment changes
     return () => {
       stopPlayback();
     };
-  }, [stopPlayback]);
+  }, [stopPlayback, fragment.id]); // Add fragment.id to dependencies
 
 
   const handleCommentSubmit = (e: React.FormEvent) => {
@@ -102,7 +214,7 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
 
      const commentToAdd: Comment = {
         id: `comment-${Date.now()}`,
-        author: "CurrentUser",
+        author: "CurrentUser", // Replace with actual user later
         text: newComment,
         timestamp: new Date(),
      };
@@ -120,7 +232,7 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
       <Card className="overflow-hidden shadow-md transition-shadow hover:shadow-lg">
         <CardHeader className="flex flex-row items-center space-x-3 p-4 bg-card">
           <Avatar>
-            <AvatarImage src={fragment.authorAvatar} alt={fragment.author} />
+            <AvatarImage src={fragment.authorAvatar} alt={fragment.author} data-ai-hint="avatar person" />
             <AvatarFallback>{fragment.author.substring(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <div className="flex-1">
@@ -136,9 +248,26 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
                {fragment.bpm && ` • ${fragment.bpm} BPM`}
             </p>
           </div>
-           <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
-             {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-           </Button>
+           <Tooltip>
+              <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handleToggleMute} aria-label={isMuted ? "Unmute" : "Mute"}>
+                      {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                  </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                  <p>{isMuted ? "Unmute" : "Mute"}</p>
+              </TooltipContent>
+           </Tooltip>
+           <Tooltip>
+              <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handlePlayPause} aria-label={isPlaying ? "Pause fragment" : "Play fragment"}>
+                    {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                  </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                  <p>{isPlaying ? "Pause" : "Play"}</p>
+              </TooltipContent>
+           </Tooltip>
         </CardHeader>
 
         {/* Visual representation */}
@@ -146,13 +275,16 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
            <div className="grid grid-cols-4 gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto">
              {fragment.pads.map(pad => {
                 const isPadActive = pad.isActive && pad.sounds.length > 0;
-                 // Use the first sound's color if available, otherwise a gradient/neutral for multiple, or muted.
-                 const firstSoundColor = pad.sounds[0]?.color;
-                 const bgColorClass = isPadActive
-                     ? pad.sounds.length === 1 && firstSoundColor
-                         ? firstSoundColor
-                         : 'bg-gradient-to-br from-muted to-secondary' // Neutral/gradient for multiple sounds or if first sound lacks color
-                     : 'bg-muted/50'; // Inactive or no sound color
+                 // Use the current sound's color if available
+                 const currentSound: PadSound | undefined = pad.sounds[pad.currentSoundIndex ?? 0];
+                 const displayColor = isPadActive && currentSound ? currentSound.color : undefined;
+
+                 const bgColorClass = displayColor
+                     ? displayColor // Use the specific sound's color
+                     : isPadActive
+                         ? 'bg-gradient-to-br from-muted to-secondary' // Neutral/gradient for multiple sounds or if first sound lacks color
+                         : 'bg-muted/50'; // Inactive or no sound color
+
                const isCurrentBeat = isPlaying && currentBeat === pad.id;
 
                return (
@@ -181,14 +313,17 @@ export default function FragmentPost({ fragment }: FragmentPostProps) {
                                 <p>{pad.sounds[0].soundName}</p>
                             ) : (
                                 // List multiple sounds
+                                <>
                                 <ul className="list-none p-0 m-0 space-y-1">
-                                {pad.sounds.map((s) => (
-                                    <li key={s.soundId} className="flex items-center">
+                                {pad.sounds.map((s, idx) => (
+                                    <li key={s.soundId} className={cn("flex items-center", idx === (pad.currentSoundIndex ?? 0) ? "font-semibold" : "")}>
                                         <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color}`}></div>
                                         <span className="truncate">{s.soundName}</span>
                                     </li>
                                 ))}
                                 </ul>
+                                 <p className="text-xs text-muted-foreground mt-1 pt-1 border-t border-border/50">Current: {currentSound?.soundName}</p>
+                                </>
                             )}
                         </TooltipContent>
                     )}

@@ -1,12 +1,41 @@
 // functions/src/routes/sounds.js
 const express = require('express');
-const { db } = require('../firebaseAdmin'); // Ensure db is imported correctly
+const { db, storage } = require('../firebaseAdmin'); // Ensure db and storage are imported correctly
 
 const router = express.Router();
 
 const SOUNDS_COLLECTION = 'sounds';
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
+const URL_EXPIRATION_MS = 60 * 60 * 1000; // 1 hour
+
+// Helper function to get signed URL
+async function getSignedUrl(filePath) {
+    if (!storage || !filePath) return null;
+
+    try {
+        const bucket = storage.bucket(); // Use default bucket
+        // Ensure filePath doesn't start with a slash for gcs
+        const cleanPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        const file = bucket.file(cleanPath);
+
+        // Check if the file exists before trying to get a URL
+        const [exists] = await file.exists();
+        if (!exists) {
+            console.warn(`File not found in storage: ${cleanPath}`);
+            return null;
+        }
+
+        const [url] = await file.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + URL_EXPIRATION_MS,
+        });
+        return url;
+    } catch (error) {
+        console.error(`Error getting signed URL for ${filePath}:`, error.message);
+        return null; // Return null if there's an error
+    }
+}
 
 router.get('/', async (req, res) => {
     let { limit, startAfter } = req.query;
@@ -39,6 +68,8 @@ router.get('/', async (req, res) => {
         const snapshot = await query.get();
 
         const sounds = [];
+        const urlPromises = []; // Store promises for getting signed URLs
+
         snapshot.forEach(doc => {
             const data = doc.data();
             // Ensure created_at exists and is a Timestamp before converting
@@ -46,19 +77,43 @@ router.get('/', async (req, res) => {
                 ? data.created_at.toDate().toISOString()
                 : null; // Handle cases where it might be missing or not a Timestamp
 
-            sounds.push({
+            const soundData = {
                 id: doc.id,
                 ...data,
                 created_at: createdAtISO, // Use the potentially null ISO string
-            });
+            };
+
+            sounds.push(soundData);
+            // Add promise to fetch download URL if source_url exists
+            if (data.source_url) {
+                urlPromises.push(getSignedUrl(data.source_url).then(url => ({ id: doc.id, downloadUrl: url })));
+            } else {
+                 urlPromises.push(Promise.resolve({ id: doc.id, downloadUrl: null })); // Resolve immediately if no source_url
+            }
         });
+
+        // Wait for all signed URL promises to resolve
+        const urlResults = await Promise.all(urlPromises);
+        const downloadUrlsMap = urlResults.reduce((acc, result) => {
+             if (result) { // Check if result is not null/undefined
+                acc[result.id] = result.downloadUrl;
+             }
+             return acc;
+        }, {});
+
+
+        // Add downloadUrl to each sound object
+        const soundsWithUrls = sounds.map(sound => ({
+            ...sound,
+            downloadUrl: downloadUrlsMap[sound.id] || null, // Assign fetched URL or null
+        }));
 
         // Determine the cursor for the next page
         const lastVisible = snapshot.docs[snapshot.docs.length - 1];
         const nextPageCursor = lastVisible ? lastVisible.id : null;
 
         res.status(200).json({
-            sounds,
+            sounds: soundsWithUrls, // Return sounds with download URLs
             nextPageCursor,
         });
 
