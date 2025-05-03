@@ -17,27 +17,47 @@ export default function RemixFragmentPage() {
   useEffect(() => {
     const fetchFragment = () => {
       // TODO: Replace with actual data fetching logic using fragmentId
+      // For now, find the fragment from placeholder data
       const foundFragment = placeholderFragments.find(f => f.id === fragmentId);
 
-       // Ensure the found fragment's pads conform to the new structure
-      // This might involve mapping if the source data isn't already updated
+      // Process the found fragment's pads to ensure correct structure and playable URLs
+      // And assign colors on the client side
       const processedFragment = foundFragment ? {
           ...foundFragment,
-          pads: foundFragment.pads.map((pad): Pad => ({ // Explicitly type the mapped pad
-              id: pad.id,
-              // Ensure 'sounds' is an array, handle cases where it might be missing
-              sounds: Array.isArray(pad.sounds) ? pad.sounds.map(s => ({
-                  soundId: s.soundId,
-                  soundName: s.soundName || 'Unknown', // Ensure name exists
-                  soundUrl: s.soundUrl, // Keep original path (gs:// or relative)
-                  // *** CRITICAL: Ensure downloadUrl is processed/kept ***
-                  downloadUrl: s.downloadUrl, // Keep playable URL (http/https)
-                  source: s.source,
-                  color: getOrAssignSoundColor(s.soundId), // Use the global helper for consistent color
-              })) : [],
-              isActive: pad.isActive,
-              currentSoundIndex: pad.currentSoundIndex ?? 0, // Ensure currentSoundIndex is initialized
-          }))
+          pads: foundFragment.pads.map((pad): Pad => {
+              const processedSounds: PadSound[] = (pad.sounds || [])
+                  .filter(s => s.soundId) // Ensure soundId exists
+                  .map(s => {
+                      // Prioritize downloadUrl if it's a valid HTTPS URL or relative path
+                      let playableUrl = (s.downloadUrl && (s.downloadUrl.startsWith('http') || s.downloadUrl.startsWith('/'))) ? s.downloadUrl : undefined;
+
+                      // Fallback for presets: use relative soundUrl if downloadUrl is missing/invalid
+                      if (!playableUrl && s.source === 'predefined' && s.soundUrl && s.soundUrl.startsWith('/')) {
+                          playableUrl = s.soundUrl;
+                      }
+
+                      if (!playableUrl) {
+                          console.warn(`Remix Load: Sound ${s.soundName || s.soundId} missing valid playable URL.`);
+                      }
+
+                      return {
+                          soundId: s.soundId,
+                          soundName: s.soundName || 'Unknown Sound',
+                          soundUrl: s.soundUrl, // Keep original path (gs:// or relative)
+                          downloadUrl: playableUrl, // Store the *validated* playable URL
+                          source: s.source,
+                          // Assign color on the client side
+                          color: getOrAssignSoundColor(s.soundId),
+                      };
+                  });
+
+              return {
+                  id: pad.id,
+                  sounds: processedSounds,
+                  isActive: pad.isActive,
+                  currentSoundIndex: pad.currentSoundIndex ?? 0, // Ensure currentSoundIndex is initialized
+              };
+          })
       } : null;
 
 
@@ -48,6 +68,15 @@ export default function RemixFragmentPage() {
     if (fragmentId) {
       // Simulate network delay for loading state
       setLoading(true);
+      // Clear existing color map before processing new fragment
+      // This might need a more robust solution if colors should persist across remixes
+      // but for now, ensures fresh assignment per remix load.
+      if (typeof window !== 'undefined') {
+         // Accessing client-side map directly - consider moving map management if needed elsewhere
+         // This assumes fragment-editor's map is accessible or recreated here.
+         // A cleaner approach might involve a shared state or context for colors.
+         // For now, relying on re-initialization within getOrAssignSoundColor potentially.
+      }
       const timer = setTimeout(fetchFragment, 500); // Simulate 500ms loading
       return () => clearTimeout(timer);
     } else {
@@ -88,3 +117,4 @@ export default function RemixFragmentPage() {
     </div>
   );
 }
+

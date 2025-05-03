@@ -9,7 +9,7 @@ export interface PadSound {
   soundUrl?: string; // Original source path (e.g., from Firestore)
   downloadUrl?: string; // Playable URL (e.g., signed URL from Storage)
   source?: SoundSource;
-  color: string; // Color associated with this specific soundId
+  color?: string; // Color associated with this specific soundId - Made optional
 }
 
 export interface Pad {
@@ -54,4 +54,5 @@ export interface Sound {
   previewUrl?: string; // Explicit preview URL (potentially same as downloadUrl or source_url)
   patternStyle?: string; // Optional class for background pattern/animation
 }
+
 

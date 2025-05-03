@@ -1,35 +1,13 @@
 // src/lib/placeholder-data.ts
 import type { Fragment, Pad, PadSound, Sound } from './types';
-import { presetSounds } from './placeholder-sounds'; // Removed marketplaceSounds import
+import { presetSounds } from './placeholder-sounds'; // Import only presets
 
 // Only use preset sounds for initial static data population.
-// API sounds will be fetched separately in the component.
 const allStaticSounds: Sound[] = [...presetSounds];
 
-const colorPalette: string[] = [
-  'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
-  'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500',
-  'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500',
-  'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500',
-  'bg-rose-500',
-  'bg-red-600', 'bg-orange-600', 'bg-blue-600', 'bg-green-600', 'bg-purple-600',
-];
-
-const soundColorMap: { [soundId: string]: string } = {};
-let availableColors = [...colorPalette];
-
-const getRandomColor = (): string => {
-  if (availableColors.length === 0) availableColors = [...colorPalette];
-  const randomIndex = Math.floor(Math.random() * availableColors.length);
-  return availableColors.splice(randomIndex, 1)[0];
-};
-
-const getSoundColor = (soundId: string): string => {
-  if (!soundColorMap[soundId]) {
-    soundColorMap[soundId] = getRandomColor();
-  }
-  return soundColorMap[soundId];
-};
+// Note: Color assignment is now done on the client-side in components like FragmentEditor and FragmentPost
+// const colorPalette: string[] = [ ... ]; // No longer needed here
+// import { getOrAssignSoundColor } from '@/components/fragments/fragment-editor'; // DO NOT IMPORT CLIENT CODE
 
 // Updated function to generate pads with potentially multiple sounds and currentSoundIndex
 const generatePads = (activeIndices: number[], soundMapping: { [index: number]: string | string[] }): Pad[] => {
@@ -43,27 +21,32 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
       soundIds.forEach(soundId => {
         // Look for the sound in the static presets first
         const sound = allStaticSounds.find(s => s.id === soundId);
+        // const color = getOrAssignSoundColor(soundId); // REMOVED: Color assignment moved to client
+
         if (sound) {
-          const color = getSoundColor(soundId);
+          // Preset sound found
+          const playableUrl = sound.downloadUrl || sound.source_url;
+          if (!playableUrl) {
+              console.warn(`Placeholder Data: Preset sound ${soundId} missing playable URL.`);
+          }
+
           padSounds.push({
             soundId: soundId,
             soundName: sound.name,
-            soundUrl: sound.source_url, // Use source_url for the path
-            downloadUrl: sound.downloadUrl || sound.previewUrl, // Use downloadUrl or previewUrl for playback
-            source: sound.type === 'preset' ? 'predefined' : sound.source_type || 'uploaded', // Map type/source
-            color: color,
+            soundUrl: sound.source_url, // Keep original path if exists
+            downloadUrl: playableUrl, // Use downloadUrl or relative source_url for playback
+            source: 'predefined', // Presets are 'predefined'
+            // color: color, // REMOVED
           });
         } else {
-          // If not found in presets, create a placeholder entry for API/marketplace sounds
-          // This assumes the sound will be fetched later or is just a placeholder ID
-          const color = getSoundColor(soundId);
+          // If not found in presets, assume it's a marketplace/API sound placeholder
           padSounds.push({
             soundId: soundId,
-            soundName: soundId.replace('mkt-', '').replace('-', ' ').replace('preset-', '') || 'Market Sound', // Generate a fallback name
-            soundUrl: undefined, // API will provide original path
-            downloadUrl: undefined, // API will provide playable URL
+            soundName: soundId.replace(/^(preset-|mkt-)/, '').replace('-', ' ') || 'Market Sound', // Generate a fallback name
+            soundUrl: undefined, // API will provide original path (e.g., gs://)
+            downloadUrl: undefined, // API *must* provide playable HTTPS URL
             source: 'uploaded', // Assume marketplace sounds are 'uploaded' or similar
-            color: color,
+            // color: color, // REMOVED
           });
         }
       });
@@ -158,3 +141,4 @@ export const placeholderFragments: Fragment[] = [
     bpm: 80,
   },
 ];
+
