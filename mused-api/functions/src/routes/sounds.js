@@ -1,6 +1,6 @@
-// src/routes/sounds.js
+// functions/src/routes/sounds.js
 const express = require('express');
-const { db } = require('../firebaseAdmin');
+const { db } = require('../firebaseAdmin'); // Ensure db is imported correctly
 
 const router = express.Router();
 
@@ -18,6 +18,11 @@ router.get('/', async (req, res) => {
     limit = Math.min(limit, MAX_LIMIT); // Enforce max limit
 
     try {
+        if (!db) {
+             console.error("Firestore database instance is not available.");
+             return res.status(500).json({ error: 'Database connection failed' });
+        }
+
         let query = db.collection(SOUNDS_COLLECTION)
                       .orderBy('created_at', 'desc') // Example ordering, adjust as needed
                       .limit(limit);
@@ -36,11 +41,15 @@ router.get('/', async (req, res) => {
         const sounds = [];
         snapshot.forEach(doc => {
             const data = doc.data();
+            // Ensure created_at exists and is a Timestamp before converting
+            const createdAtISO = data.created_at && typeof data.created_at.toDate === 'function'
+                ? data.created_at.toDate().toISOString()
+                : null; // Handle cases where it might be missing or not a Timestamp
+
             sounds.push({
                 id: doc.id,
                 ...data,
-                // Convert Firestore Timestamp to ISO string or preferred format
-                created_at: data.created_at?.toDate().toISOString(),
+                created_at: createdAtISO, // Use the potentially null ISO string
             });
         });
 
@@ -55,6 +64,7 @@ router.get('/', async (req, res) => {
 
     } catch (error) {
         console.error("Error fetching sounds:", error);
+        // Log the detailed error for debugging in Cloud Functions logs
         res.status(500).json({ error: 'Failed to fetch sounds', details: error.message });
     }
 });
