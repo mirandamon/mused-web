@@ -29,12 +29,12 @@ app.use(express.json());
 // Import routes (ensure the path is correct relative to index.js)
 const { db } = require('./src/firebaseAdmin'); // db might be needed by routes directly
 
-// API Routes - Prefix with /api which will be part of the function URL path
-app.use('/api/sounds', soundsRouter);
+// API Routes - The base URL will be the function URL (e.g., .../api)
+app.use('/sounds', soundsRouter); // Mount soundsRouter at /sounds relative to the function URL
 
-// Root endpoint for testing
-app.get('/api', (req, res) => {
-    res.send('Mused API is running via Cloud Functions!');
+// Root endpoint for testing the base path
+app.get('/', (req, res) => {
+    res.send('Mused API is running via Cloud Functions! Base / reached.');
 });
 
 

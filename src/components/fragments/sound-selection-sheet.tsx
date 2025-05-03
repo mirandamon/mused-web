@@ -39,8 +39,8 @@ const fetchSounds = async (): Promise<Sound[]> => {
       throw new Error("API URL is not configured. Please set NEXT_PUBLIC_MUSED_API_URL.");
     }
 
-    // Ensure the endpoint path includes /api/sounds
-    const endpoint = `${apiUrl}/api/sounds?limit=50`; // TODO: Implement pagination later
+    // Ensure the endpoint path is just /sounds relative to the base API URL
+    const endpoint = `${apiUrl}/sounds?limit=50`; // TODO: Implement pagination later
 
     console.log(`Fetching sounds from: ${endpoint}`); // Log the URL being fetched
 
