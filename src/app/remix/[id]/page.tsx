@@ -5,8 +5,9 @@ import { useParams } from 'next/navigation';
 import FragmentEditor from '@/components/fragments/fragment-editor';
 import { placeholderFragments } from '@/lib/placeholder-data'; // Use placeholder data
 import { useEffect, useState } from 'react';
-import type { Fragment, Pad } from '@/lib/types'; // Import Pad type
+import type { Fragment, Pad, PadSound } from '@/lib/types'; // Import Pad type
 import { Skeleton } from '@/components/ui/skeleton';
+import { getOrAssignSoundColor } from '@/components/fragments/fragment-editor'; // Import the helper
 
 export default function RemixFragmentPage() {
   const params = useParams();
@@ -29,9 +30,10 @@ export default function RemixFragmentPage() {
               sounds: Array.isArray(pad.sounds) ? pad.sounds.map(s => ({
                   soundId: s.soundId,
                   soundName: s.soundName || 'Unknown', // Ensure name exists
-                  soundUrl: s.soundUrl,
+                  soundUrl: s.soundUrl, // Keep original path
+                  downloadUrl: s.downloadUrl, // Keep playable URL
                   source: s.source,
-                  color: s.color || '', // Ensure color exists (or handle default assignment)
+                  color: getOrAssignSoundColor(s.soundId), // Use the global helper for consistent color
               })) : [],
               isActive: pad.isActive,
               currentSoundIndex: pad.currentSoundIndex ?? 0, // Ensure currentSoundIndex is initialized
