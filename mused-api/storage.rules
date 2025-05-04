@@ -1,0 +1,15 @@
+rules_version = '2'; // Specifies the version of the rules language.
+
+service firebase.storage { // Declares that these rules apply to Firebase Storage.
+  match /b/{bucket}/o { // Matches any file in any bucket.
+    match /{allPaths=**} { // Matches any file path.
+      // Allow public read access to all files.
+      allow read: if true;
+
+      // Only allow writing if the content type is 'audio/wav'.
+      allow write: if request.resource.contentType == 'audio/wav';
+
+
+    }
+  }
+}

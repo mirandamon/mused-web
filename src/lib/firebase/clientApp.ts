@@ -2,7 +2,7 @@
 import { initializeApp, getApps, getApp, type FirebaseOptions } from 'firebase/app';
 // Import other Firebase services as needed, e.g., getFirestore, getAuth
 // import { getFirestore } from 'firebase/firestore';
-// import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -20,7 +20,7 @@ let firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Get specific Firebase services (uncomment and use as needed)
 // export const db = getFirestore(firebaseApp);
 // export const auth = getAuth(firebaseApp);
-// export const storage = getStorage(firebaseApp); // Example for storage
+export const storage = getStorage(firebaseApp);
 
 export default firebaseApp;
 
