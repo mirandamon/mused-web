@@ -12,7 +12,6 @@ import type { Pad, PadSound, Sound } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-// Removed import of presetSounds
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getStorage, ref, getDownloadURL } from "firebase/storage";
 import { storage } from "@/lib/firebase/clientApp"; // Import storage instance
@@ -68,6 +67,11 @@ export const getOrAssignSoundColor = (soundId: string): string => {
         return 'bg-muted'; // Default color
     }
 
+    // Get map/pool from window if available (to persist across re-renders if needed)
+    globalSoundColorMap = (window as any).globalSoundColorMap || globalSoundColorMap;
+    globalAvailableColorsPool = (window as any).globalAvailableColorsPool || globalAvailableColorsPool;
+
+
     if (globalSoundColorMap.has(soundId)) {
         return globalSoundColorMap.get(soundId)!; // Return existing color
     } else {
@@ -79,6 +83,11 @@ export const getOrAssignSoundColor = (soundId: string): string => {
         // Select a random color but don't remove it from the pool permanently
         const newColor = getRandomColor();
         globalSoundColorMap.set(soundId, newColor); // Store the assignment globally
+
+        // Update window object
+        (window as any).globalSoundColorMap = globalSoundColorMap;
+        (window as any).globalAvailableColorsPool = globalAvailableColorsPool;
+
         return newColor;
     }
 };
@@ -230,6 +239,19 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
    // Initialize pads and assign colors on the client side
    useEffect(() => {
+       // Initialize window objects if they don't exist
+       if (typeof window !== 'undefined') {
+           if (!(window as any).globalSoundColorMap) {
+               (window as any).globalSoundColorMap = new Map<string, string>();
+           }
+           if (!(window as any).globalAvailableColorsPool) {
+               (window as any).globalAvailableColorsPool = [...colorPalette];
+           }
+           // Assign the global refs from the window object
+           globalSoundColorMap = (window as any).globalSoundColorMap;
+           globalAvailableColorsPool = (window as any).globalAvailableColorsPool;
+       }
+
        // Function to process pads and sounds
        const processPadsAsync = async () => {
             const processedPadsPromises = (rawInitialPads || defaultPads).map(async (rawPad) => {
@@ -293,9 +315,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
             console.log("Preserving color map for remix/initial load.");
             processPadsAsync();
          } else if (pads === defaultPads) { // Only reset/process if pads are still default (fresh load)
-            globalSoundColorMap = new Map<string, string>();
-            globalAvailableColorsPool = [...colorPalette];
-            console.log("Color map reset for new fragment.");
+             if (typeof window !== 'undefined') {
+                 (window as any).globalSoundColorMap = new Map<string, string>();
+                 (window as any).globalAvailableColorsPool = [...colorPalette];
+                 globalSoundColorMap = (window as any).globalSoundColorMap;
+                 globalAvailableColorsPool = (window as any).globalAvailableColorsPool;
+                 console.log("Color map reset for new fragment.");
+             }
             processPadsAsync(); // Process default pads (will be empty sounds)
          }
 
@@ -549,7 +575,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            console.warn(`Adding sound: Playable URL missing for ${originalSourceUrl}, attempting resolve...`);
            try {
                const storageRef = ref(storage, originalSourceUrl); // Use ref from firebase/storage
-               playableUrl = await getDownloadURL(storageRef); // Assign resolved URL to playableUrl
+               // Await the promise and assign the result to playableUrl
+               playableUrl = await getDownloadURL(storageRef);
                console.log(`Resolved gs:// to download URL during add: ${playableUrl}`);
            } catch (error) {
                console.error(`Failed to get download URL for ${originalSourceUrl} during add:`, error);
