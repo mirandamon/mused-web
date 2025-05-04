@@ -663,7 +663,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        // **Resolve URL if necessary before adding**
        let playableUrl = sound.downloadUrl; // Use pre-resolved URL from API first
 
-       if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
+       if (!playableUrl && originalSourceUrl) {
            console.warn(`Adding sound: Playable URL missing for ${originalSourceUrl}, attempting resolve...`);
            playableUrl = await resolveGsUrlToDownloadUrl(originalSourceUrl); // Await resolution
            if (!playableUrl) {
@@ -671,9 +671,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                return; // Stop if URL resolution fails
            }
            console.log(`Resolved URL during add: ${playableUrl}`);
-       } else if (!playableUrl && originalSourceUrl) {
-            console.warn(`Adding sound: Original source URL "${originalSourceUrl}" is not gs:// and downloadUrl is missing. Attempting to use source_url as playable.`);
-            playableUrl = originalSourceUrl; // Assume source_url might be playable if not gs:// (legacy?)
        }
 
        // **Final validation: Ensure we have a valid HTTPS URL**
@@ -846,7 +843,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
       const playBeat = (beatIndex: number) => {
         const padToPlay = pads.find(pad => pad.id === beatIndex);
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-          console.log(`Playing beat: ${beatIndex}, Pad: ${padToPlay.id}`);
+          // console.log(`Playing beat: ${beatIndex}, Pad: ${padToPlay.id}`);
           const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
           const urlToUse = soundToPlay?.downloadUrl; // Use resolved URL
 
@@ -930,8 +927,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
    }
 
    // Prevent popover close when clicking +/- buttons
-   const handlePopoverInteraction = (e: React.MouseEvent) => {
+   const handlePopoverInteraction = (e: React.MouseEvent | React.TouchEvent) => {
         e.preventDefault();
+        e.stopPropagation();
    }
 
 
@@ -1156,12 +1154,23 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                                   className="my-2"
                               />
                               <div className="flex justify-between items-center mt-2">
-                                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={decrementBpm} disabled={bpm <= MIN_BPM} onMouseDown={handlePopoverInteraction}>
-                                      <Minus className="h-4 w-4" />
+                                  {/* Use onPointerDownCapture to prevent Popover from closing */}
+                                  <Button
+                                      variant="outline" size="icon" className="h-8 w-8"
+                                      onClick={decrementBpm}
+                                      disabled={bpm <= MIN_BPM}
+                                      onPointerDownCapture={handlePopoverInteraction} // Changed event
+                                  >
+                                      <Minus className="h-4 w-4" aria-hidden="true" />
                                       <span className="sr-only">Decrease BPM</span>
                                   </Button>
-                                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={incrementBpm} disabled={bpm >= MAX_BPM} onMouseDown={handlePopoverInteraction}>
-                                      <Plus className="h-4 w-4" />
+                                  <Button
+                                       variant="outline" size="icon" className="h-8 w-8"
+                                       onClick={incrementBpm}
+                                       disabled={bpm >= MAX_BPM}
+                                       onPointerDownCapture={handlePopoverInteraction} // Changed event
+                                  >
+                                      <Plus className="h-4 w-4" aria-hidden="true" />
                                        <span className="sr-only">Increase BPM</span>
                                   </Button>
                               </div>
