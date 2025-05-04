@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Music2, Mic, Upload, Check, Play, Pause, Settings2, Layers, Volume2, VolumeX } from 'lucide-react'; // Added Volume icons
+import { Music2, Mic, Upload, Check, Play, Pause, Layers, Volume2, VolumeX, Plus, Minus } from 'lucide-react'; // Added Volume, Plus, Minus icons
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import SoundSelectionSheetWrapper from './sound-selection-sheet'; // Updated import
@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ref, getDownloadURL } from "firebase/storage"; // Correct Firebase Storage imports
 import { storage } from "@/lib/firebase/clientApp"; // Import storage instance
+import { Slider } from "@/components/ui/slider"; // Import Slider
 
 // --- Expanded Color Palette ---
 // Added more shades and distinct colors
@@ -93,7 +94,7 @@ const getUniqueRandomColor = (): string => {
     if (availableColors.length > 0) {
         // Pick randomly from the available unique colors
         const randomIndex = Math.floor(Math.random() * availableColors.length);
-        console.log(`Assigning unique color: ${availableColors[randomIndex]}`);
+        // console.log(`Assigning unique color: ${availableColors[randomIndex]}`);
         return availableColors[randomIndex];
     } else {
         // Fallback: All unique colors are used, reuse randomly from the full palette
@@ -209,14 +210,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           return gsOrPath;
         }
 
-        // Check if it's a gs:// URL or a path
-        if (!gsOrPath.startsWith('gs://') && !gsOrPath.includes('/')) {
-           console.warn(`resolveGsUrlToDownloadUrl: Provided path is not a gs:// URL or a valid path: ${gsOrPath}`);
-           return null;
+        // Check if it's a gs:// URL
+        if (!gsOrPath.startsWith('gs://')) {
+           console.warn(`resolveGsUrlToDownloadUrl: Provided path is not a gs:// URL: ${gsOrPath}`);
+           return null; // Only resolve gs:// URLs for now
         }
 
         try {
-          const storageRef = ref(storage, gsOrPath); // ref() handles both gs:// and paths
+          const storageRef = ref(storage, gsOrPath); // ref() handles gs:// URL
           const downloadUrl = await getDownloadURL(storageRef);
           console.log(`Resolved ${gsOrPath} to ${downloadUrl}`);
           return downloadUrl;
@@ -230,7 +231,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                description: `Could not get playable URL for ${gsOrPath.split('/').pop() || 'sound'}. Check storage permissions.`,
              });
           }, 0);
-          return null; // Return null instead of empty string on failure
+          return null; // Return null on failure
         }
      // eslint-disable-next-line react-hooks/exhaustive-deps
      }, [toast]); // Depend on toast
@@ -244,14 +245,35 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        // **Determine the URL to fetch:** Prioritize provided downloadUrl, resolve originalUrl if needed.
        let fetchUrl = downloadUrl; // Start with the potentially already resolved URL
 
-       // If no downloadUrl provided or it's invalid, and originalUrl exists, try resolving originalUrl.
-       if ((!fetchUrl || !fetchUrl.startsWith('http')) && originalUrl) {
-           console.log(`loadAudio: Resolving original URL: ${originalUrl}`);
+       // If no downloadUrl provided or it's invalid, and originalUrl exists and is gs://, try resolving it.
+       if ((!fetchUrl || !fetchUrl.startsWith('http')) && originalUrl && originalUrl.startsWith('gs://')) {
+           console.log(`loadAudio: Resolving gs:// URL: ${originalUrl}`);
            fetchUrl = await resolveGsUrlToDownloadUrl(originalUrl); // Await the resolution
            if (!fetchUrl) {
-               console.error(`loadAudio: Failed to resolve original URL ${originalUrl}. Cannot load audio.`);
+               console.error(`loadAudio: Failed to resolve gs:// URL ${originalUrl}. Cannot load audio.`);
                return null; // Stop if resolution failed
            }
+       } else if ((!fetchUrl || !fetchUrl.startsWith('http')) && originalUrl) {
+           // Handle cases where originalUrl might be a relative path (legacy presets, now likely invalid) or other format
+           console.warn(`loadAudio: URL is not gs:// and not already a valid HTTPS URL. Attempting to use as-is: ${originalUrl}`);
+           // If it's relative, prepend origin (though presets are gone, this logic might catch edge cases)
+           if (originalUrl.startsWith('/') && typeof window !== 'undefined') {
+                fetchUrl = window.location.origin + originalUrl;
+           } else {
+                fetchUrl = originalUrl; // Use as-is, might fail
+           }
+           // If still not HTTP(S), error out
+            if (!fetchUrl || !fetchUrl.startsWith('http')) {
+                console.error(`loadAudio: Invalid or non-HTTP(S) URL provided or resolved: ${fetchUrl || originalUrl}`);
+                setTimeout(() => {
+                  toast({
+                      variant: "destructive",
+                      title: "Audio Load Error",
+                      description: `Cannot load sound from invalid URL: ${fetchUrl || originalUrl}`,
+                  });
+                }, 0);
+               return null;
+            }
        } else if (!fetchUrl || !fetchUrl.startsWith('http')) {
            // If after all checks, fetchUrl is still invalid, log error and exit.
            console.error(`loadAudio: Invalid or non-HTTP(S) URL provided: ${fetchUrl || originalUrl}`);
@@ -280,6 +302,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            // Handle specific errors like 404 or 403 (permissions)
            if (response.status === 403) {
                console.warn(`loadAudio: Permission denied for ${fetchUrl}. Check Storage rules.`);
+           } else if (response.status === 404) {
+               console.warn(`loadAudio: Sound file not found at ${fetchUrl}.`);
            }
            return null; // Don't throw, just return null on fetch error
          }
@@ -639,7 +663,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        // **Resolve URL if necessary before adding**
        let playableUrl = sound.downloadUrl; // Use pre-resolved URL from API first
 
-       if (!playableUrl && originalSourceUrl) {
+       if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
            console.warn(`Adding sound: Playable URL missing for ${originalSourceUrl}, attempting resolve...`);
            playableUrl = await resolveGsUrlToDownloadUrl(originalSourceUrl); // Await resolution
            if (!playableUrl) {
@@ -647,6 +671,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                return; // Stop if URL resolution fails
            }
            console.log(`Resolved URL during add: ${playableUrl}`);
+       } else if (!playableUrl && originalSourceUrl) {
+            console.warn(`Adding sound: Original source URL "${originalSourceUrl}" is not gs:// and downloadUrl is missing. Attempting to use source_url as playable.`);
+            playableUrl = originalSourceUrl; // Assume source_url might be playable if not gs:// (legacy?)
        }
 
        // **Final validation: Ensure we have a valid HTTPS URL**
@@ -866,14 +893,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     }
   };
 
-  const handleBpmChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newBpm = parseInt(event.target.value, 10);
-    if (!isNaN(newBpm) && newBpm > 0 && newBpm <= 300) {
-      setBpm(newBpm);
-    } else if (event.target.value === '') {
-       setBpm(120); // Reset to default if input is cleared
-    }
-  };
 
   // Effect to restart or stop playback if bpm or pads change while playing
   useEffect(() => {
@@ -882,7 +901,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     }
     // Cleanup function to stop playback when component unmounts or dependencies change
     return () => stopPlayback();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, bpm, pads, startPlayback, stopPlayback]); // Re-run if isPlaying, bpm, or pads change
 
    const handleSheetOpenChange = (open: boolean) => {
@@ -894,6 +912,27 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        }
      }
    };
+
+   // --- BPM Control ---
+   const MIN_BPM = 40;
+   const MAX_BPM = 240;
+
+   const handleBpmSliderChange = (value: number[]) => {
+      setBpm(value[0]);
+   };
+
+   const incrementBpm = () => {
+      setBpm(prev => Math.min(prev + 1, MAX_BPM));
+   }
+
+   const decrementBpm = () => {
+      setBpm(prev => Math.max(prev - 1, MIN_BPM));
+   }
+
+   // Prevent popover close when clicking +/- buttons
+   const handlePopoverInteraction = (e: React.MouseEvent) => {
+        e.preventDefault();
+   }
 
 
   return (
@@ -1080,44 +1119,57 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                  </TooltipContent>
                </Tooltip>
 
-               <Popover>
+                {/* BPM Control Popover */}
+                <Popover>
                   <PopoverTrigger asChild>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" aria-label="Playback Settings">
-                              <Settings2 className="h-5 w-5" />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            <p>Playback Settings</p>
-                        </TooltipContent>
-                    </Tooltip>
+                      <Tooltip>
+                          <TooltipTrigger asChild>
+                               <Button variant="ghost" className="tabular-nums w-24 justify-start px-2">
+                                  {bpm} BPM
+                               </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                              <p>Adjust Tempo (BPM)</p>
+                          </TooltipContent>
+                      </Tooltip>
                   </PopoverTrigger>
-                  <PopoverContent className="w-48 p-4">
-                     <div className="grid gap-4">
-                       <div className="space-y-2">
-                         <h4 className="font-medium leading-none">Playback</h4>
-                         <p className="text-sm text-muted-foreground">
-                           Adjust the tempo.
-                         </p>
-                       </div>
-                       <div className="grid gap-2">
-                         <Label htmlFor="bpm-input">BPM</Label>
-                         <Input
-                           id="bpm-input"
-                           type="number"
-                           min="1"
-                           max="300"
-                           step="1"
-                           value={bpm}
-                           onChange={handleBpmChange}
-                           className="h-8"
-                         />
-                       </div>
-                     </div>
+                  <PopoverContent className="w-64 p-4" onOpenAutoFocus={(e) => e.preventDefault()}> {/* Prevent focus steal */}
+                      <div className="grid gap-4">
+                          <div className="space-y-2">
+                              <h4 className="font-medium leading-none">Tempo</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Adjust the playback speed (beats per minute).
+                              </p>
+                          </div>
+                          <div className="grid gap-2">
+                              <div className="flex items-center justify-between">
+                                 <Label htmlFor="bpm-slider" className="text-sm font-medium">BPM</Label>
+                                 <span className="text-sm font-semibold tabular-nums w-12 text-right">{bpm}</span>
+                              </div>
+                              <Slider
+                                  id="bpm-slider"
+                                  min={MIN_BPM}
+                                  max={MAX_BPM}
+                                  step={1}
+                                  value={[bpm]}
+                                  onValueChange={handleBpmSliderChange}
+                                  className="my-2"
+                              />
+                              <div className="flex justify-between items-center mt-2">
+                                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={decrementBpm} disabled={bpm <= MIN_BPM} onMouseDown={handlePopoverInteraction}>
+                                      <Minus className="h-4 w-4" />
+                                      <span className="sr-only">Decrease BPM</span>
+                                  </Button>
+                                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={incrementBpm} disabled={bpm >= MAX_BPM} onMouseDown={handlePopoverInteraction}>
+                                      <Plus className="h-4 w-4" />
+                                       <span className="sr-only">Increase BPM</span>
+                                  </Button>
+                              </div>
+                          </div>
+                      </div>
                   </PopoverContent>
                 </Popover>
-               <span className="text-sm text-muted-foreground tabular-nums w-16 text-center">{bpm} BPM</span>
+
              </div>
 
              {/* Right side: Sound selection/recording */}
