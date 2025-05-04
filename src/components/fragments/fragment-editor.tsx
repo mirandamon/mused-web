@@ -225,21 +225,12 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
       return null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // Dependencies on refs should be stable
+  }, []); // Removed toast dependency as it causes infinite loops in some scenarios
 
 
    // Initialize pads and assign colors on the client side
    useEffect(() => {
-       // Clear global map ONLY if it's a fresh load (e.g., not a remix)
-       // This preserves colors across interactions within the editor instance.
-       if (!rawInitialPads) { // If creating new fragment, clear map
-         globalSoundColorMap = new Map<string, string>();
-         globalAvailableColorsPool = [...colorPalette];
-         console.log("Color map reset for new fragment.");
-       } else {
-         console.log("Preserving color map for remix/initial load.");
-       }
-
+       // Function to process pads and sounds
        const processPadsAsync = async () => {
             const processedPadsPromises = (rawInitialPads || defaultPads).map(async (rawPad) => {
                 const processedSoundsPromises = (rawPad.sounds || [])
@@ -282,7 +273,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                         };
                     });
 
-                const processedSounds = (await Promise.all(processedSoundsPromises)).filter(s => s !== null) as PadSound[]; // Filter out nulls
+                const processedSounds = (await Promise.all(processedSoundsPromises)).filter(s => s !== null) as PadSound[];
 
                 return {
                     ...rawPad,
@@ -296,7 +287,18 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
             setPads(finalPads);
         };
 
-        processPadsAsync();
+        // Only run processing if rawInitialPads exists or it's the initial mount
+        // And ensure color map is handled correctly based on context (new vs remix)
+         if (rawInitialPads) {
+            console.log("Preserving color map for remix/initial load.");
+            processPadsAsync();
+         } else if (pads === defaultPads) { // Only reset/process if pads are still default (fresh load)
+            globalSoundColorMap = new Map<string, string>();
+            globalAvailableColorsPool = [...colorPalette];
+            console.log("Color map reset for new fragment.");
+            processPadsAsync(); // Process default pads (will be empty sounds)
+         }
+
    // eslint-disable-next-line react-hooks/exhaustive-deps
    }, [rawInitialPads]); // Re-run only when rawInitialPads change
 
@@ -542,12 +544,12 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        let playableUrl = sound.downloadUrl || sound.previewUrl; // Prefer direct URLs from API
        const originalSourceUrl = sound.source_url; // Keep the original path (likely gs://)
 
-       // If no playable URL and source_url is gs://, resolve it (should ideally be pre-resolved)
+       // If no playable URL and source_url is gs://, resolve it NOW before validation
        if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
            console.warn(`Adding sound: Playable URL missing for ${originalSourceUrl}, attempting resolve...`);
            try {
                const storageRef = ref(storage, originalSourceUrl); // Use ref from firebase/storage
-               playableUrl = await getDownloadURL(storageRef);
+               playableUrl = await getDownloadURL(storageRef); // Assign resolved URL to playableUrl
                console.log(`Resolved gs:// to download URL during add: ${playableUrl}`);
            } catch (error) {
                console.error(`Failed to get download URL for ${originalSourceUrl} during add:`, error);
@@ -563,14 +565,14 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        }
 
        // Final validation: Check if we have a playable URL (http, https)
-       // Removed relative path check as presets are gone
+       // Now playableUrl should contain the resolved URL if it was gs://
        if (!playableUrl || !playableUrl.startsWith('http')) {
            console.error(`Cannot add sound "${sound.name}": Missing or invalid playable URL (requires HTTPS). Found: ${playableUrl}`);
             setTimeout(() => { // Avoid updating state during render
                toast({
                    variant: "destructive",
                    title: "Cannot Add Sound",
-                   description: `Sound "${sound.name}" is missing a valid playable URL.`,
+                   description: `Sound "${sound.name}" is missing a valid playable URL. Found: ${playableUrl}`, // Include found URL in msg
                });
            }, 0);
            return; // Stop if no valid playable URL
