@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getStorage, ref, getDownloadURL } from "firebase/storage";
+import { getStorage, ref, getDownloadURL } from "firebase/storage"; // Correct Firebase Storage imports
 import { storage } from "@/lib/firebase/clientApp"; // Import storage instance
 
 // Define a palette of Tailwind background color classes
@@ -153,89 +153,113 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
    // eslint-disable-next-line react-hooks/exhaustive-deps
    }, []); // Run only once on mount
 
-  const loadAudio = useCallback(async (url: string): Promise<AudioBuffer | null> => {
-    if (!audioContextRef.current || !url) {
-      console.warn("loadAudio: Audio context not ready or URL missing.");
-      return null;
-    }
-    if (audioBuffersRef.current[url]) {
-      // console.log(`loadAudio: Returning cached buffer for ${url}`);
-      return audioBuffersRef.current[url];
-    }
+   /**
+    * Asynchronously resolves a gs:// URL or path to an HTTPS download URL.
+    * @param gsOrPath The gs:// URL or storage path.
+    * @returns Promise resolving to the HTTPS URL or null if resolution fails.
+    */
+   const resolveGsUrlToDownloadUrl = useCallback(async (gsOrPath: string): Promise<string | null> => {
+     if (!gsOrPath || !gsOrPath.startsWith('gs://')) {
+       console.warn(`resolveGsUrlToDownloadUrl: Provided path is not a gs:// URL: ${gsOrPath}`);
+       return null; // Only handle gs:// URLs
+     }
+     try {
+       const storageRef = ref(storage, gsOrPath); // Use ref from firebase/storage
+       const downloadUrl = await getDownloadURL(storageRef);
+       console.log(`Resolved ${gsOrPath} to ${downloadUrl}`);
+       return downloadUrl;
+     } catch (error) {
+       console.error(`Failed to get download URL for ${gsOrPath}:`, error);
+       // Use setTimeout to avoid calling toast during render phase
+       setTimeout(() => {
+          toast({
+            variant: "destructive",
+            title: "URL Resolution Error",
+            description: `Could not get playable URL for ${gsOrPath.split('/').pop() || 'sound'}.`,
+          });
+       }, 0);
+       return null;
+     }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [storage]); // Dependency on storage instance (and toast via setTimeout)
 
-    let fetchUrl = url;
-     if (url.startsWith('gs://')) {
-       // Resolve gs:// URL to a downloadable HTTPS URL
-       try {
-         const storageRef = ref(storage, url); // Use client storage instance
-         fetchUrl = await getDownloadURL(storageRef);
-         console.log(`Resolved gs:// ${url} to ${fetchUrl}`);
-       } catch (error) {
-         console.error(`Failed to get download URL for gs:// URL ${url}:`, error);
-         setTimeout(() => { // Avoid state update during render
-            toast({
-              variant: "destructive",
-              title: "Audio Load Error",
-              description: `Could not resolve sound URL: ${url.split('/').pop() || 'Unknown'}.`,
-            });
-         }, 0);
-         return null; // Stop if URL resolution fails
+   const loadAudio = useCallback(async (originalUrl: string, downloadUrl?: string): Promise<AudioBuffer | null> => {
+       if (!audioContextRef.current) {
+         console.warn("loadAudio: Audio context not ready.");
+         return null;
        }
-     } else if (url.startsWith('/') && typeof window !== 'undefined') {
-        // Relative path (potentially legacy preset logic, might be obsolete)
-        fetchUrl = window.location.origin + url;
-        console.warn(`Attempting to load potential preset from relative path: ${fetchUrl}. This might fail if presets are removed.`);
-     } else if (!url.startsWith('http')) {
-        // Invalid format (not gs://, not relative, not http/https)
-        console.error(`loadAudio: Invalid or non-HTTP(S)/gs:// URL provided: ${url}`);
-        setTimeout(() => { // Use setTimeout to avoid state update during render
-           toast({
-               variant: "destructive",
-               title: "Audio Load Error",
-               description: `Cannot load sound from invalid URL: ${url.split('/').pop() || 'Unknown'}.`,
-           });
-        }, 0);
-        return null; // Cannot fetch non-http(s) or relative URLs without context
-    }
 
-    // console.log(`loadAudio: Attempting to load audio from: ${fetchUrl}`); // Log the actual fetch URL
-    try {
-      const response = await fetch(fetchUrl);
-      if (!response.ok) {
-         console.error(`loadAudio: HTTP error! status: ${response.status} for URL ${fetchUrl}`);
-         // Optionally, check for 404 specifically for removed presets
-         if (response.status === 404 && url.startsWith('/')) {
-             console.warn(`loadAudio: Preset sound likely removed (${url}).`);
-             // Don't throw error, just return null
-             return null;
+       // **Determine the URL to fetch:** Prioritize provided downloadUrl, resolve originalUrl if needed.
+       let fetchUrl = downloadUrl; // Start with the potentially already resolved URL
+
+       // If no downloadUrl provided or it's invalid, and originalUrl is gs://, try resolving it.
+       if ((!fetchUrl || !fetchUrl.startsWith('http')) && originalUrl && originalUrl.startsWith('gs://')) {
+           console.log(`loadAudio: Resolving gs:// URL: ${originalUrl}`);
+           fetchUrl = await resolveGsUrlToDownloadUrl(originalUrl);
+           if (!fetchUrl) {
+               console.error(`loadAudio: Failed to resolve gs:// URL ${originalUrl}. Cannot load audio.`);
+               return null; // Stop if resolution failed
+           }
+       } else if (originalUrl && originalUrl.startsWith('/') && typeof window !== 'undefined') {
+           // Handle legacy relative paths (potential presets)
+           fetchUrl = window.location.origin + originalUrl;
+           console.warn(`loadAudio: Using relative path (potential preset): ${fetchUrl}`);
+       } else if (!fetchUrl || !fetchUrl.startsWith('http')) {
+           // If after all checks, fetchUrl is still invalid, log error and exit.
+           console.error(`loadAudio: Invalid or non-HTTP(S) URL provided: ${fetchUrl || originalUrl}`);
+            setTimeout(() => {
+              toast({
+                  variant: "destructive",
+                  title: "Audio Load Error",
+                  description: `Cannot load sound from invalid URL: ${fetchUrl || originalUrl}`,
+              });
+            }, 0);
+           return null;
+       }
+
+       // **Check Cache:** Use the RESOLVED fetchUrl as the primary cache key.
+       if (audioBuffersRef.current[fetchUrl]) {
+         // console.log(`loadAudio: Returning cached buffer for ${fetchUrl}`);
+         return audioBuffersRef.current[fetchUrl];
+       }
+
+       // **Fetch and Decode Audio:**
+       console.log(`loadAudio: Attempting to fetch audio from: ${fetchUrl}`);
+       try {
+         const response = await fetch(fetchUrl);
+         if (!response.ok) {
+           console.error(`loadAudio: HTTP error! status: ${response.status} for URL ${fetchUrl}`);
+           // Handle 404 for potentially removed presets
+           if (response.status === 404 && originalUrl.startsWith('/')) {
+               console.warn(`loadAudio: Preset sound likely removed (${originalUrl}).`);
+           }
+           return null; // Don't throw, just return null on fetch error
          }
-         throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+         const arrayBuffer = await response.arrayBuffer();
+         const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
 
-      // Cache using the original URL (gs:// or relative) AND the resolved fetchUrl
-      audioBuffersRef.current[url] = audioBuffer; // Cache with original URL
-      if (fetchUrl !== url) {
-        audioBuffersRef.current[fetchUrl] = audioBuffer; // Also cache with resolved URL
-      }
+         // **Cache the buffer:** Use the RESOLVED fetchUrl as the key.
+         audioBuffersRef.current[fetchUrl] = audioBuffer;
+         // Optionally, also cache by original gs:// URL if needed, but primary should be HTTPS
+         // if (originalUrl && originalUrl !== fetchUrl) {
+         //   audioBuffersRef.current[originalUrl] = audioBuffer;
+         // }
 
-      // console.log(`loadAudio: Audio loaded and decoded successfully: ${url}`);
-      return audioBuffer;
-    } catch (error: any) {
-      console.error(`loadAudio: Error loading or decoding audio file ${url} (fetching from ${fetchUrl}):`, error);
-      setTimeout(() => { // Use setTimeout to avoid state update during render
-         toast({
-           variant: "destructive",
-           title: "Audio Load Error",
-           description: `Could not load sound: ${url.split('/').pop()?.split('?')[0] || 'Unknown'}. ${error.message}`,
-         });
-      }, 0);
-      return null;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Removed toast dependency as it causes infinite loops in some scenarios
-
+         console.log(`loadAudio: Audio loaded and decoded successfully: ${fetchUrl}`);
+         return audioBuffer;
+       } catch (error: any) {
+         console.error(`loadAudio: Error loading or decoding audio file ${originalUrl} (fetching from ${fetchUrl}):`, error);
+         setTimeout(() => {
+           toast({
+             variant: "destructive",
+             title: "Audio Load Error",
+             description: `Could not load sound: ${originalUrl.split('/').pop()?.split('?')[0] || 'Unknown'}. ${error.message}`,
+           });
+         }, 0);
+         return null;
+       }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [resolveGsUrlToDownloadUrl]); // Dependencies: context and the resolver function
 
    // Initialize pads and assign colors on the client side
    useEffect(() => {
@@ -254,7 +278,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
        // Function to process pads and sounds
        const processPadsAsync = async () => {
-            const processedPadsPromises = (rawInitialPads || defaultPads).map(async (rawPad) => {
+            const processedPadsPromises = (rawInitialPads || defaultPads).map(async (rawPad): Promise<Pad> => {
                 const processedSoundsPromises = (rawPad.sounds || [])
                     .filter(ps => ps.soundId) // Ensure soundId exists
                     .map(async (padSound): Promise<PadSound | null> => {
@@ -265,24 +289,27 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                         let playableUrl = padSound.downloadUrl;
                         const originalSourceUrl = padSound.soundUrl; // Could be gs:// or potentially removed preset path
 
+                        // **Resolve gs:// URL if necessary**
                         if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
-                             try {
-                                 const storageRef = ref(storage, originalSourceUrl);
-                                 playableUrl = await getDownloadURL(storageRef);
-                                 console.log(`Initial Pad Load: Resolved ${originalSourceUrl} to ${playableUrl}`);
-                             } catch (resolveError) {
-                                 console.error(`Initial Pad Load: Failed to resolve gs:// URL ${originalSourceUrl}:`, resolveError);
-                                 // Keep playableUrl as undefined, handle playback failure later
+                             console.log(`Initial Pad Load: Resolving gs:// URL: ${originalSourceUrl}`);
+                             playableUrl = await resolveGsUrlToDownloadUrl(originalSourceUrl);
+                             if (!playableUrl) {
+                                 console.warn(`Initial Pad Load: Failed to resolve gs:// URL ${originalSourceUrl}. Sound may not play.`);
+                                 // Keep playableUrl as null/undefined
                              }
                         } else if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('/')) {
                             // Legacy preset path - might be invalid now
                             console.warn(`Initial Pad Load: Found relative path ${originalSourceUrl}. Assuming preset (might be removed). Using path as potential playable URL.`);
-                            playableUrl = originalSourceUrl;
+                            playableUrl = originalSourceUrl; // Use relative path directly (might 404)
                         }
 
 
                         if (!playableUrl) {
                            console.warn(`Initial Pad Load: Sound ${padSound.soundName || padSound.soundId} missing valid playable URL. Original: ${originalSourceUrl}`);
+                        } else {
+                           // Preload audio using the resolved URL
+                           // Use originalSourceUrl as the first argument for potential caching key, and playableUrl as the second
+                           loadAudio(originalSourceUrl || playableUrl, playableUrl);
                         }
 
                         return {
@@ -322,23 +349,25 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                  globalAvailableColorsPool = (window as any).globalAvailableColorsPool;
                  console.log("Color map reset for new fragment.");
              }
-            processPadsAsync(); // Process default pads (will be empty sounds)
+             // Process default pads (will be empty sounds but ensures state structure is correct)
+             // No need to await here as default pads have no sounds needing resolution
+              setPads(defaultPads);
          }
 
    // eslint-disable-next-line react-hooks/exhaustive-deps
    }, [rawInitialPads]); // Re-run only when rawInitialPads change
 
-
-
-   // Preload sounds when pads data changes
+   // Preload sounds when pads data changes (ensure URLs are resolved)
+   // This might be redundant if initial load covers it, but good for dynamic changes.
    useEffect(() => {
        pads.forEach(pad => {
            pad.sounds.forEach(sound => {
-               // *** CRITICAL: Always prioritize resolved downloadUrl, fallback to original soundUrl (gs:// or relative) ***
+               // Use the resolved downloadUrl if available, otherwise load needs to handle gs://
                const urlToLoad = sound.downloadUrl || sound.soundUrl;
                if (urlToLoad) {
                   // console.log(`Editor Preloading sound: ${sound.soundName} from ${urlToLoad}`);
-                  loadAudio(urlToLoad); // Start loading (will resolve gs:// if needed)
+                  // Pass original soundUrl for potential caching, downloadUrl for fetching
+                  loadAudio(sound.soundUrl || urlToLoad, sound.downloadUrl);
                } else {
                   console.warn(`Editor Pad ${pad.id}, Sound ${sound.soundName}: Missing any URL (downloadUrl/soundUrl) for preloading.`);
                }
@@ -405,22 +434,25 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           const pad = pads.find(p => p.id === id);
            if (pad?.isActive && pad.sounds.length > 0) {
                const soundToPlay = pad.sounds[pad.currentSoundIndex ?? 0];
-               // *** CRITICAL: Prioritize resolved downloadUrl, fallback to original soundUrl for loading ***
-               const urlToUse = soundToPlay?.downloadUrl || soundToPlay?.soundUrl; // Get the best available URL
-               if (urlToUse) {
-                   // Check cache with both original and resolved URL if they differ
-                   const buffer = audioBuffersRef.current[urlToUse] || (soundToPlay?.soundUrl && audioBuffersRef.current[soundToPlay.soundUrl]) ;
+               // *** Use resolved downloadUrl first for playing ***
+               const urlToUse = soundToPlay?.downloadUrl; // Get the resolved URL
+
+               if (urlToUse && urlToUse.startsWith('http')) {
+                    const buffer = audioBuffersRef.current[urlToUse]; // Check cache using HTTPS URL
                     if (buffer) {
                        playSound(buffer);
                    } else {
                        console.warn(`Buffer for ${urlToUse} not found, attempting load...`);
-                       loadAudio(urlToUse).then(loadedBuffer => {
+                       // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
+                       loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
                            if (loadedBuffer) playSound(loadedBuffer);
                            else console.error(`Failed to load buffer on demand for ${urlToUse}`);
                        });
                    }
                } else {
-                 console.warn(`Pad ${id}: No valid URL (downloadUrl or soundUrl) found for sound ${soundToPlay?.soundName}.`);
+                 console.warn(`Pad ${id}: No valid download URL found for sound ${soundToPlay?.soundName}. Original: ${soundToPlay?.soundUrl}`);
+                 // Optionally, try resolving the original soundUrl again on demand if needed
+                 // if (soundToPlay?.soundUrl?.startsWith('gs://')) { ... }
                }
            }
       }
@@ -450,21 +482,22 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              const pad = pads.find(p => p.id === id);
               if (pad?.isActive && pad.sounds.length > 0) {
                   const soundToPlay = pad.sounds[pad.currentSoundIndex ?? 0];
-                  // *** CRITICAL: Prioritize resolved downloadUrl, fallback to original soundUrl for loading ***
-                  const urlToUse = soundToPlay?.downloadUrl || soundToPlay?.soundUrl;
-                  if (urlToUse) {
-                       const buffer = audioBuffersRef.current[urlToUse] || (soundToPlay?.soundUrl && audioBuffersRef.current[soundToPlay.soundUrl]);
+                  // *** Use resolved downloadUrl first for playing ***
+                  const urlToUse = soundToPlay?.downloadUrl;
+                  if (urlToUse && urlToUse.startsWith('http')) {
+                       const buffer = audioBuffersRef.current[urlToUse];
                        if (buffer) {
                         playSound(buffer);
                       } else {
                            console.warn(`Buffer for ${urlToUse} not found (touch), attempting load...`);
-                          loadAudio(urlToUse).then(loadedBuffer => {
+                           // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
+                          loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
                               if (loadedBuffer) playSound(loadedBuffer);
                               else console.error(`Failed to load buffer on demand for ${urlToUse} (touch)`);
                           });
                       }
                   } else {
-                     console.warn(`Pad ${id} (touch): No valid URL found for sound ${soundToPlay?.soundName}.`);
+                     console.warn(`Pad ${id} (touch): No valid download URL found for sound ${soundToPlay?.soundName}. Original: ${soundToPlay?.soundUrl}`);
                   }
               }
         }
@@ -570,36 +603,25 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        let playableUrl = sound.downloadUrl || sound.previewUrl; // Prefer direct URLs from API
        const originalSourceUrl = sound.source_url; // Keep the original path (likely gs://)
 
-       // If no playable URL and source_url is gs://, resolve it NOW before validation
+       // **Resolve gs:// URL if necessary before adding**
        if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
            console.warn(`Adding sound: Playable URL missing for ${originalSourceUrl}, attempting resolve...`);
-           try {
-               const storageRef = ref(storage, originalSourceUrl); // Use ref from firebase/storage
-               // Await the promise and assign the result to playableUrl
-               playableUrl = await getDownloadURL(storageRef);
-               console.log(`Resolved gs:// to download URL during add: ${playableUrl}`);
-           } catch (error) {
-               console.error(`Failed to get download URL for ${originalSourceUrl} during add:`, error);
-               setTimeout(() => { // Avoid updating state during render
-                   toast({
-                       variant: "destructive",
-                       title: "Cannot Add Sound",
-                       description: `Could not retrieve playable URL for "${sound.name}".`,
-                   });
-               }, 0);
+           playableUrl = await resolveGsUrlToDownloadUrl(originalSourceUrl);
+           if (!playableUrl) {
+               // Error toast is handled inside resolveGsUrlToDownloadUrl
                return; // Stop if URL resolution fails
            }
+           console.log(`Resolved gs:// to download URL during add: ${playableUrl}`);
        }
 
-       // Final validation: Check if we have a playable URL (http, https)
-       // Now playableUrl should contain the resolved URL if it was gs://
+       // **Final validation: Ensure we have a valid HTTPS URL**
        if (!playableUrl || !playableUrl.startsWith('http')) {
-           console.error(`Cannot add sound "${sound.name}": Missing or invalid playable URL (requires HTTPS). Found: ${playableUrl}`);
+           console.error(`Cannot add sound "${sound.name}": Missing or invalid playable URL (requires HTTPS). Original: ${originalSourceUrl}, Resolved Attempt: ${playableUrl}`);
             setTimeout(() => { // Avoid updating state during render
                toast({
                    variant: "destructive",
                    title: "Cannot Add Sound",
-                   description: `Sound "${sound.name}" is missing a valid playable URL. Found: ${playableUrl}`, // Include found URL in msg
+                   description: `Sound "${sound.name}" is missing a valid playable URL.`,
                });
            }, 0);
            return; // Stop if no valid playable URL
@@ -619,9 +641,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        toastMessage = `${sound.name} added to Pad ${selectedPadId + 1}.`;
 
        // Preload the newly added sound using the validated playable URL
-       if (playableUrl) {
-         loadAudio(playableUrl);
-       }
+       // Pass original for cache key, playable for fetching
+       loadAudio(originalSourceUrl || playableUrl, playableUrl);
      }
 
      // --- Update the state ---
@@ -688,6 +709,30 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
     console.log("Posting Fragment:", { pads, bpm, originalAuthor, originalFragmentId });
 
+    // TODO: Implement actual saving logic here
+    // 1. Prepare data for saving (ensure soundUrl is the original gs:// path or identifier, not the temporary downloadUrl)
+    const padsToSave = pads.map(pad => ({
+        ...pad,
+        sounds: pad.sounds.map(sound => ({
+            soundId: sound.soundId,
+            soundName: sound.soundName,
+            soundUrl: sound.soundUrl, // Save the ORIGINAL gs:// path
+            source: sound.source,
+            // Color is a UI concern, maybe don't save it, or save assigned color ID?
+        })),
+        // Ensure currentSoundIndex is saved if needed for default state on load
+    }));
+    const fragmentData = {
+        pads: padsToSave,
+        bpm,
+        author: "CurrentUser", // Replace with actual auth user ID/name
+        timestamp: new Date(), // Use server timestamp in real implementation
+        ...(originalFragmentId && { originalFragmentId, originalAuthor }), // Add remix info if applicable
+        // Add title if you have an input for it
+    };
+
+    console.log("Data to save:", fragmentData);
+
     // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -741,25 +786,25 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
              const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
-             // *** CRITICAL: Prioritize resolved downloadUrl, fallback to original soundUrl for loading ***
-             const urlToUse = soundToPlay?.downloadUrl || soundToPlay?.soundUrl; // Get best URL
+             // *** Use resolved downloadUrl first for playing ***
+             const urlToUse = soundToPlay?.downloadUrl; // Get best URL
 
-             if (urlToUse) {
-                // Check cache with both original and resolved URL if they differ
-                const buffer = audioBuffersRef.current[urlToUse] || (soundToPlay?.soundUrl && audioBuffersRef.current[soundToPlay.soundUrl]);
+             if (urlToUse && urlToUse.startsWith('http')) {
+                const buffer = audioBuffersRef.current[urlToUse]; // Check cache with HTTPS URL
                 if (buffer) {
                    playSound(buffer);
                 } else {
                     // Sound not loaded yet, attempt to load and play if successful
                      console.warn(`Playback: Buffer for ${urlToUse} not found, attempting load...`);
-                    loadAudio(urlToUse).then(loadedBuffer => {
+                     // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
+                    loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
                         if (loadedBuffer) playSound(loadedBuffer);
                         else console.error(`Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
                     });
                 }
              } else {
                   // Log if no valid URL found for the sound to be played
-                  console.warn(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No valid URL found.`);
+                  console.warn(`Beat: ${nextBeat}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No valid download URL found. Original: ${soundToPlay?.soundUrl}`);
              }
         }
         return nextBeat; // Update the current beat for the next interval

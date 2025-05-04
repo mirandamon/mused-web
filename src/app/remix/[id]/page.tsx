@@ -4,11 +4,12 @@
 import { useParams } from 'next/navigation';
 import FragmentEditor, { getOrAssignSoundColor } from '@/components/fragments/fragment-editor'; // Import the helper
 import { placeholderFragments } from '@/lib/placeholder-data'; // Use placeholder data
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Fragment, Pad, PadSound } from '@/lib/types'; // Import Pad type
 import { Skeleton } from '@/components/ui/skeleton';
 import { getStorage, ref, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase/clientApp'; // Import client storage instance
+import { useToast } from "@/hooks/use-toast"; // Import useToast
 
 // Define a palette of Tailwind background color classes
 const colorPalette: string[] = [
@@ -36,6 +37,7 @@ export default function RemixFragmentPage() {
   const [originalFragment, setOriginalFragment] = useState<Fragment | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast(); // Get toast function
 
   // Clear color map on initial load of remix page to ensure fresh state
   useEffect(() => {
@@ -52,6 +54,34 @@ export default function RemixFragmentPage() {
      // eslint-disable-next-line react-hooks/exhaustive-deps
    }, []);
 
+    /**
+     * Asynchronously resolves a gs:// URL or path to an HTTPS download URL.
+     * @param gsOrPath The gs:// URL or storage path.
+     * @returns Promise resolving to the HTTPS URL or null if resolution fails.
+     */
+    const resolveGsUrlToDownloadUrl = useCallback(async (gsOrPath: string): Promise<string | null> => {
+      if (!gsOrPath || !gsOrPath.startsWith('gs://')) {
+        console.warn(`Remix resolveGsUrl: Path is not gs:// URL: ${gsOrPath}`);
+        return null;
+      }
+      try {
+        const storageRef = ref(storage, gsOrPath);
+        const downloadUrl = await getDownloadURL(storageRef);
+        console.log(`Remix Resolved ${gsOrPath} to ${downloadUrl}`);
+        return downloadUrl;
+      } catch (error) {
+        console.error(`Remix Failed to get download URL for ${gsOrPath}:`, error);
+        setTimeout(() => {
+           toast({
+             variant: "destructive",
+             title: "URL Resolution Error",
+             description: `Could not get playable URL for ${gsOrPath.split('/').pop() || 'sound'}.`,
+           });
+        }, 0);
+        return null;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [toast]); // Depend on toast
 
   useEffect(() => {
     const fetchAndProcessFragment = async () => {
@@ -77,28 +107,24 @@ export default function RemixFragmentPage() {
               let playableUrl = s.downloadUrl; // Prioritize existing downloadUrl
               const originalSourceUrl = s.soundUrl; // Keep gs:// or potentially invalid relative path
 
-              // If no playable URL and soundUrl is gs://, resolve it
+              // **Resolve gs:// URL if necessary**
               if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
-                try {
-                  const storageRef = ref(storage, originalSourceUrl);
-                  playableUrl = await getDownloadURL(storageRef);
-                  console.log(`Remix Load: Resolved ${originalSourceUrl} to ${playableUrl}`);
-                } catch (resolveError) {
-                  console.error(`Remix Load: Failed to resolve gs:// URL ${originalSourceUrl}:`, resolveError);
-                  // Keep playableUrl as undefined, handle potential playback issues later
-                }
+                  console.log(`Remix Load: Resolving gs:// URL: ${originalSourceUrl}`);
+                  playableUrl = await resolveGsUrlToDownloadUrl(originalSourceUrl);
+                  if (!playableUrl) {
+                    console.warn(`Remix Load: Failed to resolve gs:// URL ${originalSourceUrl}. Sound may not play.`);
+                    // Keep playableUrl as null/undefined
+                  }
+              } else if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('/')) {
+                   // Handle legacy relative paths (potential presets) - These likely won't work anymore
+                   console.warn(`Remix Load: Found relative path ${originalSourceUrl} for potentially removed preset. Attempting to use.`);
+                   playableUrl = originalSourceUrl; // Use relative path (might 404)
               }
-               // Removed fallback for presets, as presets are gone
-               // else if (!playableUrl && s.source === 'predefined' && originalSourceUrl && originalSourceUrl.startsWith('/')) {
-               //     console.warn(`Remix Load: Found relative path ${originalSourceUrl} for potentially removed preset. Attempting to use.`);
-               //     playableUrl = originalSourceUrl; // Use relative path for presets
-               // }
-
 
               if (!playableUrl) {
                 console.warn(`Remix Load: Sound ${s.soundName || s.soundId} missing valid playable URL. Original: ${originalSourceUrl}`);
-                 // If still no playable URL, we might not want to include this sound
-                 // return null; // Option: Skip sounds that cannot be resolved
+                 // Option: Skip sounds that cannot be resolved or played
+                 // return null;
               }
 
               // Assign color on the client side *during* processing
@@ -146,7 +172,8 @@ export default function RemixFragmentPage() {
       setError("No fragment ID specified.");
       setLoading(false);
     }
-  }, [fragmentId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fragmentId, resolveGsUrlToDownloadUrl]); // Add resolver as dependency
 
   if (loading) {
     return (
@@ -186,8 +213,3 @@ export default function RemixFragmentPage() {
     </div>
   );
 }
-
-// No longer need global definitions here as they are handled at the top
-// let globalSoundColorMap = new Map<string, string>();
-// const colorPalette: string[] = [ ... ];
-// let globalAvailableColorsPool = [...colorPalette];
