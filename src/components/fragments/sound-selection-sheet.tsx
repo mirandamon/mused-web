@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import React, { useState, useMemo, useEffect } from "react";
 import { Separator } from "../ui/separator";
 import { Badge } from "../ui/badge";
-import { presetSounds } from "@/lib/placeholder-sounds"; // Import only presets statically
+// Removed import of presetSounds
 import { useQuery, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Skeleton } from "../ui/skeleton"; // Import Skeleton
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert"; // Import Alert
@@ -66,14 +66,17 @@ const fetchSounds = async (): Promise<Sound[]> => {
         return data.sounds.map(apiSound => ({
             id: apiSound.id, // Ensure ID is always present
             name: apiSound.name || 'Unnamed Sound', // Default name
-            type: apiSound.source_type === 'predefined' ? 'preset' : 'marketplace', // Map source_type
+            // Type is now primarily 'marketplace' or similar based on API context.
+            // The 'predefined' type from API might mean something different (e.g., admin-uploaded).
+            // We map source_type to 'type' for frontend consistency.
+            type: apiSound.source_type === 'predefined' ? 'predefined' : 'marketplace', // Map source_type
             previewUrl: apiSound.downloadUrl || apiSound.source_url || '', // Prioritize downloadUrl, then source_url
             downloadUrl: apiSound.downloadUrl || '', // Store the playable URL
             author: apiSound.owner_user_id || 'Unknown', // Use owner_user_id as author
             // API specific fields
             owner_user_id: apiSound.owner_user_id,
             source_type: apiSound.source_type,
-            source_url: apiSound.source_url, // Keep original source path if needed
+            source_url: apiSound.source_url, // Keep original source path if needed (gs://)
             created_at: apiSound.created_at,
             // Generate a placeholder patternStyle based on ID or type for visual variety
             patternStyle: generatePatternStyle(apiSound.id),
@@ -135,8 +138,8 @@ function SoundSelectionSheet({
      enabled: isOpen, // Only fetch when the sheet is open
    });
 
-  // Combine preset and fetched sounds
-  const allSounds = useMemo(() => [...presetSounds, ...apiSounds], [apiSounds]);
+  // Use only fetched sounds
+  const allSounds = useMemo(() => [...apiSounds], [apiSounds]);
 
   // Get the IDs of currently selected sounds for quick lookup
   const currentSelectedSoundIds = useMemo(() => {
@@ -160,9 +163,9 @@ function SoundSelectionSheet({
      );
   }, [searchTerm, allSounds]);
 
-
-  const filteredPresetSounds = filteredSounds.filter(s => s.type === 'preset');
-  const filteredMarketplaceSounds = filteredSounds.filter(s => s.type === 'marketplace');
+  // No longer need separate filtered lists for presets vs marketplace
+  // const filteredPresetSounds = filteredSounds.filter(s => s.type === 'preset');
+  // const filteredMarketplaceSounds = filteredSounds.filter(s => s.type === 'marketplace');
 
    useEffect(() => {
      // Clear search term when sheet opens
@@ -177,6 +180,7 @@ function SoundSelectionSheet({
       // Create a copy to avoid modifying the array while iterating
       const soundsToRemove = [...currentPadSounds];
       soundsToRemove.forEach(padSound => {
+          // Find the full sound info only from API sounds
           const fullSound = allSounds.find(s => s.id === padSound.soundId);
           if (fullSound) {
               // Call the toggle function which handles removal
@@ -219,8 +223,8 @@ function SoundSelectionSheet({
                 <ScrollArea className="h-24 border rounded-lg bg-muted/30 p-2">
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {currentPadSounds.map((padSound) => {
-                            // Find the full sound info, preferring API sounds then presets
-                            const fullSound = apiSounds.find(s => s.id === padSound.soundId) || presetSounds.find(s => s.id === padSound.soundId);
+                            // Find the full sound info from API sounds
+                            const fullSound = apiSounds.find(s => s.id === padSound.soundId);
                             // If sound info not found (e.g., removed from source), maybe skip or show placeholder
                              if (!fullSound && !padSound.soundName) return null; // Skip if no info
 
@@ -265,29 +269,11 @@ function SoundSelectionSheet({
 
         <ScrollArea className="flex-1 -mx-4">
            <div className="px-4 space-y-6">
-            {/* Preset Sounds Section */}
-            {(filteredPresetSounds.length > 0 || (searchTerm === '' && presetSounds.length > 0)) && (
-              <section>
-                <h3 className="text-lg font-semibold mb-3 px-2">Featured & Presets</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                  {filteredPresetSounds.map((sound) => (
-                    <SoundTile
-                        key={sound.id}
-                        sound={sound}
-                        onSelect={handleSoundToggle}
-                        isSelected={currentSelectedSoundIds.has(sound.id)}
-                    />
-                  ))}
-                </div>
-                {filteredPresetSounds.length === 0 && searchTerm !== '' && (
-                    <p className="text-muted-foreground text-sm px-2">No preset sounds match your search.</p>
-                )}
-              </section>
-            )}
+            {/* Removed Preset Sounds Section */}
 
-             {/* Marketplace Sounds Section */}
+             {/* Marketplace Sounds Section - Now the main section */}
              <section>
-                 <h3 className="text-lg font-semibold mb-3 px-2">Marketplace</h3>
+                 <h3 className="text-lg font-semibold mb-3 px-2">All Sounds</h3>
                  {(isLoading || isFetching) && !isError && ( // Show skeleton if loading OR fetching in background
                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                          {Array.from({ length: 8 }).map((_, index) => (
@@ -307,7 +293,7 @@ function SoundSelectionSheet({
                  {!isLoading && !isFetching && !isError && ( // Only show results when not loading/fetching and no error
                     <>
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                            {filteredMarketplaceSounds.map((sound) => (
+                            {filteredSounds.map((sound) => ( // Use filteredSounds directly
                                 <SoundTile
                                     key={sound.id}
                                     sound={sound}
@@ -316,11 +302,11 @@ function SoundSelectionSheet({
                                 />
                             ))}
                         </div>
-                        {filteredMarketplaceSounds.length === 0 && searchTerm !== '' && !isLoading && (
-                            <p className="text-muted-foreground text-sm px-2 mt-2">No marketplace sounds match your search.</p>
+                        {filteredSounds.length === 0 && searchTerm !== '' && !isLoading && (
+                            <p className="text-muted-foreground text-sm px-2 mt-2">No sounds match your search.</p>
                         )}
-                        {filteredMarketplaceSounds.length === 0 && searchTerm === '' && !isLoading && apiSounds.length === 0 && (
-                            <p className="text-muted-foreground text-sm px-2 mt-2">No sounds found in the marketplace yet.</p>
+                        {filteredSounds.length === 0 && searchTerm === '' && !isLoading && apiSounds.length === 0 && (
+                            <p className="text-muted-foreground text-sm px-2 mt-2">No sounds found yet.</p>
                         )}
                         {/* TODO: Add Load More Button for pagination later */}
                         {/* {searchTerm === '' && !isLoading && nextPageCursor && (
@@ -332,8 +318,8 @@ function SoundSelectionSheet({
                  )}
              </section>
 
-             {/* Fallback if search yields no results across both sections */}
-             {filteredPresetSounds.length === 0 && filteredMarketplaceSounds.length === 0 && searchTerm !== '' && !isLoading && !isFetching && (
+             {/* Fallback if search yields no results */}
+             {filteredSounds.length === 0 && searchTerm !== '' && !isLoading && !isFetching && !isError && (
                 <p className="text-center text-muted-foreground mt-6">No sounds found matching "{searchTerm}".</p>
              )}
           </div>

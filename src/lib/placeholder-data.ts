@@ -1,15 +1,11 @@
 // src/lib/placeholder-data.ts
 import type { Fragment, Pad, PadSound, Sound } from './types';
-import { presetSounds } from './placeholder-sounds'; // Import only presets
-
-// Only use preset sounds for initial static data population.
-const allStaticSounds: Sound[] = [...presetSounds];
+// Removed import of presetSounds
 
 // Note: Color assignment is now done on the client-side in components like FragmentEditor and FragmentPost
-// const colorPalette: string[] = [ ... ]; // No longer needed here
-// import { getOrAssignSoundColor } from '@/components/fragments/fragment-editor'; // DO NOT IMPORT CLIENT CODE
 
 // Updated function to generate pads with potentially multiple sounds and currentSoundIndex
+// Assumes all sound IDs map to sounds available via the API.
 const generatePads = (activeIndices: number[], soundMapping: { [index: number]: string | string[] }): Pad[] => {
   return Array.from({ length: 16 }, (_, i) => {
     const isActiveInitially = activeIndices.includes(i);
@@ -19,40 +15,22 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
     if (soundInput) { // Process sounds regardless of initial isActive status
       const soundIds = Array.isArray(soundInput) ? soundInput : [soundInput];
       soundIds.forEach(soundId => {
-        // Look for the sound in the static presets first
-        const sound = allStaticSounds.find(s => s.id === soundId);
-        // const color = getOrAssignSoundColor(soundId); // REMOVED: Color assignment moved to client
-
-        if (sound) {
-          // Preset sound found
-          const playableUrl = sound.downloadUrl || sound.source_url;
-          if (!playableUrl) {
-              console.warn(`Placeholder Data: Preset sound ${soundId} missing playable URL.`);
-          }
-
-          padSounds.push({
-            soundId: soundId,
-            soundName: sound.name,
-            soundUrl: sound.source_url, // Keep original path if exists
-            downloadUrl: playableUrl, // Use downloadUrl or relative source_url for playback
-            source: 'predefined', // Presets are 'predefined'
-            // color: color, // REMOVED
-          });
-        } else {
-          // If not found in presets, assume it's a marketplace/API sound placeholder
-          padSounds.push({
-            soundId: soundId,
-            soundName: soundId.replace(/^(preset-|mkt-)/, '').replace('-', ' ') || 'Market Sound', // Generate a fallback name
-            soundUrl: undefined, // API will provide original path (e.g., gs://)
-            downloadUrl: undefined, // API *must* provide playable HTTPS URL
-            source: 'uploaded', // Assume marketplace sounds are 'uploaded' or similar
-            // color: color, // REMOVED
-          });
-        }
+        // Assume it's a marketplace/API sound placeholder
+        // Name and URLs will be populated later by API fetch/resolution logic in components
+        padSounds.push({
+          soundId: soundId,
+          soundName: soundId.replace(/^(mkt-)/, '').replace('-', ' ') || 'API Sound', // Generate a fallback name
+          soundUrl: undefined, // API will provide original path (e.g., gs://)
+          downloadUrl: undefined, // API *must* provide playable HTTPS URL or resolution logic must handle gs://
+          source: 'uploaded', // Assume marketplace sounds are 'uploaded' or similar
+          // color: // REMOVED - Handled client-side
+        });
       });
     }
 
     // A pad is active if explicitly in activeIndices *and* has sounds loaded
+    // Consider if isActive should just be true if it has sounds, regardless of activeIndices for placeholders?
+    // For now, sticking to the original logic: must be in activeIndices.
     const isActive = isActiveInitially && padSounds.length > 0;
 
     return {
@@ -65,24 +43,25 @@ const generatePads = (activeIndices: number[], soundMapping: { [index: number]: 
 };
 
 
-// --- Sound Mappings (Can now include arrays for multiple sounds) ---
+// --- Sound Mappings (Remove preset- IDs, use only API/marketplace IDs) ---
+// NOTE: These IDs MUST correspond to actual sound IDs in your Firestore 'sounds' collection.
 const frag1SoundMap = {
-  0: 'preset-kick-1', 2: 'preset-snare-1', 5: 'preset-hihat-1', 7: 'preset-hihat-1',
-  8: 'preset-kick-1', 10: 'preset-snare-1', 13: ['preset-bass-1', 'mkt-fx-1'], // Multiple sounds on pad 13
-  15: 'preset-bass-1',
+  0: 'mkt-kick-1', 2: 'mkt-snare-1', 5: 'mkt-hihat-1', 7: 'mkt-hihat-1',
+  8: 'mkt-kick-1', 10: 'mkt-snare-1', 13: ['mkt-bass-1', 'mkt-fx-1'], // Multiple sounds on pad 13
+  15: 'mkt-bass-1',
 };
 const frag2SoundMap = {
   1: 'mkt-kick-2', 3: 'mkt-snare-2', 4: 'mkt-hihat-2', 6: 'mkt-hihat-2',
   9: 'mkt-bass-2', 11: 'mkt-bass-2', 12: 'mkt-vox-1', 14: 'mkt-vox-1',
 };
-const frag3SoundMap = { // Remix of frag1
-  0: 'preset-kick-1', 1: 'mkt-clap-1', 2: 'preset-snare-1', 3: 'mkt-clap-1',
-  5: 'preset-hihat-1', 6: 'mkt-perc-1', 9: 'preset-bass-1', 10: ['mkt-fx-1', 'preset-lead-1'], // Multiple sounds
-  13: ['preset-bass-1', 'mkt-fx-1'], // Kept multiple sounds from frag1
+const frag3SoundMap = { // Remix of frag1 (using API IDs)
+  0: 'mkt-kick-1', 1: 'mkt-clap-1', 2: 'mkt-snare-1', 3: 'mkt-clap-1',
+  5: 'mkt-hihat-1', 6: 'mkt-perc-1', 9: 'mkt-bass-1', 10: ['mkt-fx-1', 'mkt-lead-1'], // Multiple sounds
+  13: ['mkt-bass-1', 'mkt-fx-1'], // Kept multiple sounds from frag1
   14: 'mkt-fx-1',
 };
 const frag4SoundMap = {
-  4: 'mkt-lead-2', 5: 'mkt-lead-2', 6: 'preset-pad-1', 7: 'preset-pad-1',
+  4: 'mkt-lead-2', 5: 'mkt-lead-2', 6: 'mkt-pad-1', 7: 'mkt-pad-1',
 };
 
 // --- Placeholder Fragments ---
@@ -141,4 +120,3 @@ export const placeholderFragments: Fragment[] = [
     bpm: 80,
   },
 ];
-

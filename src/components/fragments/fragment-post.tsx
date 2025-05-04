@@ -69,18 +69,56 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
      }
   }, []);
 
-  // Process fragment pads on mount and when initialFragment changes to assign colors
-  useEffect(() => {
-    const processedPads = initialFragment.pads.map(pad => ({
-      ...pad,
-      sounds: pad.sounds.map(sound => ({
-        ...sound,
-        // Assign color on the client using the imported helper
-        color: sound.color || getOrAssignSoundColor(sound.soundId)
-      }))
-    }));
-    setFragment({ ...initialFragment, pads: processedPads });
-  }, [initialFragment]);
+   // Process fragment pads on mount to resolve gs:// URLs and assign colors
+   useEffect(() => {
+       const processFragmentAsync = async () => {
+           const processedPadsPromises = initialFragment.pads.map(async (pad): Promise<Pad> => {
+               const processedSoundsPromises = (pad.sounds || []).map(async (sound): Promise<PadSound | null> => {
+                   let playableUrl = sound.downloadUrl; // Already resolved URL
+                   const originalSourceUrl = sound.soundUrl; // Original path (gs:// or relative)
+
+                   // If no playable URL and soundUrl is gs://, resolve it
+                   if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
+                       try {
+                           const storageRef = ref(storage, originalSourceUrl);
+                           playableUrl = await getDownloadURL(storageRef);
+                           console.log(`Post Load: Resolved ${originalSourceUrl} to ${playableUrl}`);
+                       } catch (resolveError) {
+                           console.error(`Post Load: Failed to resolve gs:// URL ${originalSourceUrl}:`, resolveError);
+                           // Keep playableUrl as undefined
+                       }
+                   } else if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('/')) {
+                       // Legacy preset path - might be invalid
+                       console.warn(`Post Load: Found relative path ${originalSourceUrl}. Assuming preset (might be removed). Using path as potential playable URL.`);
+                       playableUrl = originalSourceUrl;
+                   }
+
+                    if (!playableUrl) {
+                        console.warn(`Post Load: Sound ${sound.soundName || sound.soundId} missing valid playable URL. Original: ${originalSourceUrl}`);
+                    }
+
+                   return {
+                       ...sound,
+                       soundUrl: originalSourceUrl, // Keep original path
+                       downloadUrl: playableUrl, // Store resolved or original playable URL
+                       // Assign color on the client using the imported helper
+                       color: sound.color || getOrAssignSoundColor(sound.soundId)
+                   };
+               });
+               const processedSounds = (await Promise.all(processedSoundsPromises)).filter(s => s !== null) as PadSound[];
+
+               return {
+                   ...pad,
+                   sounds: processedSounds,
+               };
+           });
+           const processedPads = await Promise.all(processedPadsPromises);
+           setFragment({ ...initialFragment, pads: processedPads });
+       };
+
+       processFragmentAsync();
+       // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [initialFragment]); // Re-run when initialFragment changes
 
 
   // --- Audio Loading (uses global cache) ---
@@ -91,25 +129,22 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
       }
 
       // Check cache using the playable URL (downloadUrl or relative preset URL)
-      if (globalAudioBuffers[url]) {
-         // console.log(`Post loadAudio: Returning cached buffer for ${url}`);
-         return globalAudioBuffers[url];
+      const cacheKey = originalUrl || url; // Prefer original URL as key if available
+      if (globalAudioBuffers[cacheKey]) {
+          return globalAudioBuffers[cacheKey];
       }
+       // Also check cache with the potentially resolved URL
+       if (url !== cacheKey && globalAudioBuffers[url]) {
+           return globalAudioBuffers[url];
+       }
+
 
       let fetchUrl = url;
 
       // Handle different URL types
-      if (url.startsWith('/')) {
-          // Preset sound: construct full URL
-          if (typeof window !== 'undefined') {
-              fetchUrl = window.location.origin + url;
-          } else {
-              console.error("Post loadAudio: Cannot construct preset URL on server.");
-              return null;
-          }
-      } else if (url.startsWith('gs://')) {
-          // gs:// URL needs resolving
-          console.warn(`Post loadAudio: Received gs:// URL, attempting to resolve: ${url}`);
+      if (url.startsWith('gs://')) {
+          // gs:// URL needs resolving (should ideally be resolved before calling loadAudio)
+          console.warn(`Post loadAudio: Received gs:// URL unexpectedly, attempting to resolve: ${url}`);
           try {
               const storageRef = ref(storage, url); // Use client storage instance
               fetchUrl = await getDownloadURL(storageRef);
@@ -123,6 +158,15 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                       description: `Could not get playable URL for sound.`,
                   });
                }, 0);
+              return null;
+          }
+      } else if (url.startsWith('/')) {
+          // Relative path (legacy preset) - This will likely fail
+          if (typeof window !== 'undefined') {
+              fetchUrl = window.location.origin + url;
+              console.warn(`Post loadAudio: Attempting fetch from relative path (likely preset): ${fetchUrl}`);
+          } else {
+              console.error("Post loadAudio: Cannot construct relative path URL on server.");
               return null;
           }
       } else if (!url.startsWith('http')) {
@@ -143,16 +187,19 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
           const response = await fetch(fetchUrl);
           if (!response.ok) {
                console.error(`Post loadAudio: HTTP error! status: ${response.status} for URL ${fetchUrl}`);
+               // Handle 404 for potentially removed presets
+               if (response.status === 404 && url.startsWith('/')) {
+                  console.warn(`Post loadAudio: Preset sound likely removed (${url}).`);
+                  return null; // Don't throw, just return null
+               }
                throw new Error(`HTTP error! status: ${response.status}`);
           }
           const arrayBuffer = await response.arrayBuffer();
           const audioBuffer = await globalAudioContext.decodeAudioData(arrayBuffer);
 
-          // Cache using the ORIGINAL URL (could be gs:// or relative) if provided,
-          // otherwise use the fetched URL. This helps if the download URL expires.
-          const cacheKey = originalUrl || url;
+          // Cache using the ORIGINAL URL (gs:// or relative) if provided,
+          // AND the fetched URL. This helps if the download URL expires.
           globalAudioBuffers[cacheKey] = audioBuffer;
-          // Also cache with the fetchUrl if it's different and valid
           if (fetchUrl !== cacheKey && fetchUrl.startsWith('http')) {
                globalAudioBuffers[fetchUrl] = audioBuffer;
           }
@@ -172,13 +219,13 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
           return null;
       }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // No dependencies needed as it uses global context/refs
+  }, [toast]); // Dependency on toast
 
   // Preload sounds for this fragment when it becomes visible or data changes
   useEffect(() => {
       fragment.pads.forEach(pad => {
           pad.sounds.forEach(sound => {
-              // *** CRITICAL: Prioritize downloadUrl, fallback to soundUrl (might be gs://) ***
+              // *** CRITICAL: Prioritize resolved downloadUrl, fallback to original soundUrl (gs:// or relative) ***
               const urlToLoad = sound.downloadUrl || sound.soundUrl;
               if (urlToLoad) {
                   // console.log(`Post Preloading: ${sound.soundName} using URL: ${urlToLoad}`);
@@ -272,19 +319,20 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
 
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
             const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
-            // *** CRITICAL: Use downloadUrl primarily, fallback to soundUrl ***
-            const urlToPlay = soundToPlay?.downloadUrl || soundToPlay?.soundUrl;
+            // *** CRITICAL: Use resolved downloadUrl primarily, fallback to original soundUrl ***
+            const urlToUse = soundToPlay?.downloadUrl || soundToPlay?.soundUrl; // Get best available URL
 
-            if (urlToPlay) {
-               const buffer = globalAudioBuffers[urlToPlay] || globalAudioBuffers[soundToPlay?.soundUrl || '']; // Check cache with both URLs
+            if (urlToUse) {
+                // Check cache using both URLs if they differ
+               const buffer = globalAudioBuffers[urlToUse] || (soundToPlay?.soundUrl && globalAudioBuffers[soundToPlay.soundUrl]);
                if (buffer) {
                   playSound(buffer);
                } else {
                    // Attempt to load if not found (might be slightly delayed)
-                   console.warn(`Post Playback: Buffer for ${urlToPlay} not found, attempting load...`);
-                   loadAudio(urlToPlay, soundToPlay?.soundUrl).then(loadedBuffer => {
+                   console.warn(`Post Playback: Buffer for ${urlToUse} not found, attempting load...`);
+                   loadAudio(urlToUse, soundToPlay?.soundUrl).then(loadedBuffer => {
                        if (loadedBuffer) playSound(loadedBuffer);
-                       else console.error(`Post Playback: Buffer for ${urlToPlay} could not be loaded on demand.`);
+                       else console.error(`Post Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
                    });
                }
             } else {
@@ -495,4 +543,3 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
     </TooltipProvider> // Close TooltipProvider
   );
 }
-

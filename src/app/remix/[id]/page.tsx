@@ -10,6 +10,26 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getStorage, ref, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase/clientApp'; // Import client storage instance
 
+// Define a palette of Tailwind background color classes
+const colorPalette: string[] = [
+  'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
+  'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500',
+  'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500',
+  'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500',
+  'bg-rose-500',
+  'bg-red-600', 'bg-orange-600', 'bg-blue-600', 'bg-green-600', 'bg-purple-600',
+];
+
+// Declare global color management variables (ensure they are initialized)
+let globalSoundColorMap = typeof window !== 'undefined' ? (window as any).globalSoundColorMap || new Map<string, string>() : new Map<string, string>();
+let globalAvailableColorsPool = typeof window !== 'undefined' ? (window as any).globalAvailableColorsPool || [...colorPalette] : [...colorPalette];
+
+// Assign to window object if running in browser for persistence across loads
+if (typeof window !== 'undefined') {
+  (window as any).globalSoundColorMap = globalSoundColorMap;
+  (window as any).globalAvailableColorsPool = globalAvailableColorsPool;
+}
+
 export default function RemixFragmentPage() {
   const params = useParams();
   const fragmentId = params.id as string;
@@ -23,6 +43,9 @@ export default function RemixFragmentPage() {
         // Clear the global map when starting a remix
         globalSoundColorMap = new Map<string, string>();
         globalAvailableColorsPool = [...colorPalette]; // Reset pool too
+        // Update window object
+        (window as any).globalSoundColorMap = globalSoundColorMap;
+        (window as any).globalAvailableColorsPool = globalAvailableColorsPool;
         console.log("Remix Page: Cleared global color map.");
      }
      // This effect should run only once when the component mounts
@@ -34,9 +57,7 @@ export default function RemixFragmentPage() {
     const fetchAndProcessFragment = async () => {
       setLoading(true);
       setError(null);
-      // Clear existing color map before processing new fragment
-      // This is now handled in the initial useEffect, but good to keep in mind
-      // if (typeof window !== 'undefined') { globalSoundColorMap = new Map(); }
+      // Color map is cleared in the initial useEffect
 
       try {
         // TODO: Replace with actual data fetching logic using fragmentId
@@ -52,9 +73,9 @@ export default function RemixFragmentPage() {
         const processedPadsPromises = foundFragment.pads.map(async (pad): Promise<Pad> => {
           const processedSoundsPromises = (pad.sounds || [])
             .filter(s => s.soundId) // Ensure soundId exists
-            .map(async (s): Promise<PadSound> => {
+            .map(async (s): Promise<PadSound | null> => { // Allow null return
               let playableUrl = s.downloadUrl; // Prioritize existing downloadUrl
-              const originalSourceUrl = s.soundUrl; // Keep gs:// or relative path
+              const originalSourceUrl = s.soundUrl; // Keep gs:// or potentially invalid relative path
 
               // If no playable URL and soundUrl is gs://, resolve it
               if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
@@ -67,14 +88,17 @@ export default function RemixFragmentPage() {
                   // Keep playableUrl as undefined, handle potential playback issues later
                 }
               }
-               // Fallback for presets if downloadUrl is missing/invalid
-               else if (!playableUrl && s.source === 'predefined' && originalSourceUrl && originalSourceUrl.startsWith('/')) {
-                   playableUrl = originalSourceUrl; // Use relative path for presets
-               }
+               // Removed fallback for presets, as presets are gone
+               // else if (!playableUrl && s.source === 'predefined' && originalSourceUrl && originalSourceUrl.startsWith('/')) {
+               //     console.warn(`Remix Load: Found relative path ${originalSourceUrl} for potentially removed preset. Attempting to use.`);
+               //     playableUrl = originalSourceUrl; // Use relative path for presets
+               // }
 
 
               if (!playableUrl) {
                 console.warn(`Remix Load: Sound ${s.soundName || s.soundId} missing valid playable URL. Original: ${originalSourceUrl}`);
+                 // If still no playable URL, we might not want to include this sound
+                 // return null; // Option: Skip sounds that cannot be resolved
               }
 
               // Assign color on the client side *during* processing
@@ -85,12 +109,13 @@ export default function RemixFragmentPage() {
                 soundName: s.soundName || 'Unknown Sound',
                 soundUrl: originalSourceUrl, // Keep original path
                 downloadUrl: playableUrl,   // Store the *resolved* or original valid URL
-                source: s.source || (originalSourceUrl?.startsWith('gs://') ? 'uploaded' : 'predefined'), // Infer source
+                // Infer source based on URL or assume 'uploaded' if gs://
+                source: s.source || (originalSourceUrl?.startsWith('gs://') ? 'uploaded' : 'marketplace'),
                 color: assignedColor,
               };
             });
 
-          const processedSounds = await Promise.all(processedSoundsPromises);
+          const processedSounds = (await Promise.all(processedSoundsPromises)).filter(s => s !== null) as PadSound[]; // Filter out nulls
 
           return {
             id: pad.id,
@@ -162,15 +187,7 @@ export default function RemixFragmentPage() {
   );
 }
 
-// These need to be declared globally or imported if defined elsewhere
-// Assuming they are globally available for simplicity here.
-let globalSoundColorMap = new Map<string, string>();
-const colorPalette: string[] = [
-  'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
-  'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500',
-  'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500',
-  'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500',
-  'bg-rose-500',
-  'bg-red-600', 'bg-orange-600', 'bg-blue-600', 'bg-green-600', 'bg-purple-600',
-];
-let globalAvailableColorsPool = [...colorPalette];
+// No longer need global definitions here as they are handled at the top
+// let globalSoundColorMap = new Map<string, string>();
+// const colorPalette: string[] = [ ... ];
+// let globalAvailableColorsPool = [...colorPalette];
