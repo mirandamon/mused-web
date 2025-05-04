@@ -16,14 +16,43 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ref, getDownloadURL } from "firebase/storage"; // Correct Firebase Storage imports
 import { storage } from "@/lib/firebase/clientApp"; // Import storage instance
 
-// Define a palette of Tailwind background color classes
+// --- Expanded Color Palette ---
+// Added more shades and distinct colors
 const colorPalette: string[] = [
-  'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500',
-  'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500',
-  'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500',
-  'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500',
-  'bg-rose-500',
-  'bg-red-600', 'bg-orange-600', 'bg-blue-600', 'bg-green-600', 'bg-purple-600',
+  // Reds
+  'bg-red-500', 'bg-red-600',
+  // Oranges
+  'bg-orange-500', 'bg-orange-600',
+  // Ambers
+  'bg-amber-500', 'bg-amber-600',
+  // Yellows
+  'bg-yellow-500', 'bg-yellow-600',
+  // Limes
+  'bg-lime-500', 'bg-lime-600',
+  // Greens
+  'bg-green-500', 'bg-green-600',
+  // Emeralds
+  'bg-emerald-500', 'bg-emerald-600',
+  // Teals
+  'bg-teal-500', 'bg-teal-600',
+  // Cyans
+  'bg-cyan-500', 'bg-cyan-600',
+  // Skys
+  'bg-sky-500', 'bg-sky-600',
+  // Blues
+  'bg-blue-500', 'bg-blue-600',
+  // Indigos
+  'bg-indigo-500', 'bg-indigo-600',
+  // Violets
+  'bg-violet-500', 'bg-violet-600',
+  // Purples
+  'bg-purple-500', 'bg-purple-600',
+  // Fuchsias
+  'bg-fuchsia-500', 'bg-fuchsia-600',
+  // Pinks
+  'bg-pink-500', 'bg-pink-600',
+  // Roses
+  'bg-rose-500', 'bg-rose-600',
 ];
 
 interface FragmentEditorProps {
@@ -44,30 +73,37 @@ const defaultPads: Pad[] = Array.from({ length: 16 }, (_, i) => ({
 // Check if running in a browser environment before accessing window
 const isBrowser = typeof window !== 'undefined';
 
-// Initialize global maps and pools safely
+// Initialize global maps safely
 let globalSoundColorMap = isBrowser ? (window as any).__globalSoundColorMap || new Map<string, string>() : new Map<string, string>();
-let globalAvailableColorsPool = isBrowser ? (window as any).__globalAvailableColorsPool || [...colorPalette] : [...colorPalette];
 
 // Assign to window object if running in browser for persistence across loads/renders
 if (isBrowser) {
   (window as any).__globalSoundColorMap = globalSoundColorMap;
-  (window as any).__globalAvailableColorsPool = globalAvailableColorsPool;
+  // No need to store the available pool globally, derive it when needed
 }
 
 
-// Helper function to get a random color from the palette
-const getRandomColor = (): string => {
-    if (globalAvailableColorsPool.length === 0) {
-        console.warn("Color palette exhausted, reusing colors.");
-        // Simple reset, could be improved
-        globalAvailableColorsPool = [...colorPalette];
-        if (isBrowser) (window as any).__globalAvailableColorsPool = globalAvailableColorsPool; // Update window object
+// Helper function to get a unique color for a new sound ID
+const getUniqueRandomColor = (): string => {
+    if (!isBrowser) return 'bg-muted'; // Should not be called server-side
+
+    const assignedColors = new Set(globalSoundColorMap.values());
+    const availableColors = colorPalette.filter(color => !assignedColors.has(color));
+
+    if (availableColors.length > 0) {
+        // Pick randomly from the available unique colors
+        const randomIndex = Math.floor(Math.random() * availableColors.length);
+        console.log(`Assigning unique color: ${availableColors[randomIndex]}`);
+        return availableColors[randomIndex];
+    } else {
+        // Fallback: All unique colors are used, reuse randomly from the full palette
+        console.warn("Unique color palette exhausted, reusing colors.");
+        const randomIndex = Math.floor(Math.random() * colorPalette.length);
+        return colorPalette[randomIndex];
     }
-    const randomIndex = Math.floor(Math.random() * globalAvailableColorsPool.length);
-    return globalAvailableColorsPool[randomIndex]; // Don't remove, just pick
 };
 
-// Helper to get or assign a consistent color for a sound ID
+// Helper to get or assign a consistent (and unique if new) color for a sound ID
 // MUST BE CALLED ON THE CLIENT SIDE (e.g., within useEffect or event handlers)
 export const getOrAssignSoundColor = (soundId: string): string => {
     if (!isBrowser) {
@@ -76,22 +112,20 @@ export const getOrAssignSoundColor = (soundId: string): string => {
         return 'bg-muted'; // Default color
     }
 
-    // Ensure global maps are up-to-date from window object
+    // Ensure global map is up-to-date from window object
     globalSoundColorMap = (window as any).__globalSoundColorMap || globalSoundColorMap;
-    globalAvailableColorsPool = (window as any).__globalAvailableColorsPool || globalAvailableColorsPool;
 
     if (globalSoundColorMap.has(soundId)) {
         return globalSoundColorMap.get(soundId)!; // Return existing color
     } else {
-        // Assign a new color
-        const newColor = getRandomColor(); // Use the helper
+        // Assign a new *unique* color
+        const newColor = getUniqueRandomColor(); // Use the updated helper
         globalSoundColorMap.set(soundId, newColor); // Store the assignment globally
 
         // Update window object
         (window as any).__globalSoundColorMap = globalSoundColorMap;
-        (window as any).__globalAvailableColorsPool = globalAvailableColorsPool;
 
-        console.log(`Assigned color ${newColor} to sound ${soundId}`);
+        console.log(`Assigned color ${newColor} to new sound ${soundId}`);
         return newColor;
     }
 };
@@ -199,7 +233,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           return null; // Return null instead of empty string on failure
         }
      // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, []); // Removed 'storage' dependency, assuming it's stable from clientApp
+     }, [toast]); // Depend on toast
 
    const loadAudio = useCallback(async (originalUrl: string, downloadUrl?: string): Promise<AudioBuffer | null> => {
        if (!audioContextRef.current) {
@@ -269,7 +303,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
          return null;
        }
      // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [resolveGsUrlToDownloadUrl]); // Dependencies: context and the resolver function
+     }, [resolveGsUrlToDownloadUrl, toast]); // Dependencies: context and the resolver function
 
 
    // Initialize pads and assign colors on the client side
@@ -279,12 +313,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            if (!(window as any).__globalSoundColorMap) {
                (window as any).__globalSoundColorMap = new Map<string, string>();
            }
-           if (!(window as any).__globalAvailableColorsPool) {
-               (window as any).__globalAvailableColorsPool = [...colorPalette];
-           }
-           // Assign the global refs from the window object
+           // Assign the global ref from the window object
            globalSoundColorMap = (window as any).__globalSoundColorMap;
-           globalAvailableColorsPool = (window as any).__globalAvailableColorsPool;
        }
 
        // Function to process pads and sounds
@@ -354,9 +384,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
          } else if (pads === defaultPads) { // Only reset/process if pads are still default (fresh load)
              if (isBrowser) {
                  (window as any).__globalSoundColorMap = new Map<string, string>();
-                 (window as any).__globalAvailableColorsPool = [...colorPalette];
                  globalSoundColorMap = (window as any).__globalSoundColorMap;
-                 globalAvailableColorsPool = (window as any).__globalAvailableColorsPool;
                  console.log("Color map reset for new fragment.");
              }
              // Set default pads immediately, no async processing needed for empty sounds
@@ -375,7 +403,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                // Use the resolved downloadUrl if available, otherwise load needs to handle original url
                const urlToLoad = sound.downloadUrl || sound.soundUrl;
                if (urlToLoad) {
-                  // Pass original soundUrl for potential caching, downloadUrl for fetching
+                  // Pass original soundUrl for cache key, downloadUrl for fetching
                   loadAudio(sound.soundUrl || urlToLoad, sound.downloadUrl);
                } else {
                   console.warn(`Editor Pad ${pad.id}, Sound ${sound.soundName}: Missing any URL (downloadUrl/soundUrl) for preloading.`);
@@ -580,7 +608,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   };
 
    // Handles selecting or deselecting a sound from the sheet
-   const handleToggleSound = async (sound: Sound) => {
+   const handleToggleSound = useCallback(async (sound: Sound) => {
      if (selectedPadId === null) return;
 
      let toastMessage = "";
@@ -666,7 +694,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
          toast({ title: "Sound Updated", description: toastMessage });
        }, 0);
      }
-   };
+   }, [selectedPadId, pads, resolveGsUrlToDownloadUrl, loadAudio, toast]);
 
    // Update currentSelectedPadData whenever selectedPadId or pads change
     useEffect(() => {
@@ -825,7 +853,6 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           return nextBeat; // Update the current beat for the next interval
         });
       }, beatDuration);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bpm, pads, playSound, loadAudio]);
 
 
