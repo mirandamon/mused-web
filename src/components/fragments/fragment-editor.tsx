@@ -676,7 +676,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        // **Final validation: Ensure we have a valid HTTPS URL**
        // Now playableUrl should contain the resolved URL if it was gs://
        if (!playableUrl || !playableUrl.startsWith('http')) {
-           console.error(`Cannot add sound "${sound.name}": Missing or invalid playable URL (requires HTTPS). Original: ${originalSourceUrl}, Resolved Attempt: ${playableUrl}`);
+           console.error(`Cannot add sound "${sound.name}": Missing or invalid playable URL (requires HTTPS). Found: ${playableUrl}`);
             setTimeout(() => { // Avoid updating state during render
                toast({
                    variant: "destructive",
