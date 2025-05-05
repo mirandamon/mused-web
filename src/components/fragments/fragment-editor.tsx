@@ -288,9 +288,10 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
        }
 
        // **Check Cache:** Use the RESOLVED fetchUrl as the primary cache key.
-       if (audioBuffersRef.current[fetchUrl]) {
-         // console.log(`loadAudio: Returning cached buffer for ${fetchUrl}`);
-         return audioBuffersRef.current[fetchUrl];
+       const cacheKey = fetchUrl; // Use the final URL to fetch as the cache key
+       if (audioBuffersRef.current[cacheKey]) {
+         // console.log(`loadAudio: Returning cached buffer for ${cacheKey}`);
+         return audioBuffersRef.current[cacheKey];
        }
 
        // **Fetch and Decode Audio:**
@@ -311,9 +312,9 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
          const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
 
          // **Cache the buffer:** Use the RESOLVED fetchUrl as the key.
-         audioBuffersRef.current[fetchUrl] = audioBuffer;
+         audioBuffersRef.current[cacheKey] = audioBuffer;
 
-         console.log(`loadAudio: Audio loaded and decoded successfully: ${fetchUrl}`);
+         console.log(`loadAudio: Audio loaded and decoded successfully: ${cacheKey}`);
          return audioBuffer;
        } catch (error: any) {
          console.error(`loadAudio: Error loading or decoding audio file ${originalUrl} (fetching from ${fetchUrl}):`, error);
@@ -499,7 +500,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                const urlToUse = soundToPlay?.downloadUrl; // Get the resolved URL
 
                if (urlToUse && urlToUse.startsWith('http')) {
-                    const buffer = audioBuffersRef.current[urlToUse]; // Check cache using HTTPS URL
+                    const cacheKey = urlToUse; // Use resolved URL as cache key
+                    const buffer = audioBuffersRef.current[cacheKey]; // Check cache using HTTPS URL
                     if (buffer) {
                        playSound(buffer);
                    } else {
@@ -544,7 +546,8 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                   // *** Use resolved downloadUrl first for playing ***
                   const urlToUse = soundToPlay?.downloadUrl;
                   if (urlToUse && urlToUse.startsWith('http')) {
-                       const buffer = audioBuffersRef.current[urlToUse];
+                       const cacheKey = urlToUse; // Use resolved URL as cache key
+                       const buffer = audioBuffersRef.current[cacheKey];
                        if (buffer) {
                         playSound(buffer);
                       } else {
@@ -839,41 +842,42 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
       const beatDuration = (60 / bpm) * 1000; // Calculate duration based on BPM
 
-      // Helper function to play sound for a given beat
-      const playBeat = (beatIndex: number) => {
-        const padToPlay = pads.find(pad => pad.id === beatIndex);
+      // Helper function to play all sounds for a given pad index
+      const playPadSounds = (padIndex: number) => {
+        const padToPlay = pads.find(pad => pad.id === padIndex);
         if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-          // console.log(`Playing beat: ${beatIndex}, Pad: ${padToPlay.id}`);
-          const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
-          const urlToUse = soundToPlay?.downloadUrl; // Use resolved URL
-
-          if (urlToUse && urlToUse.startsWith('http')) {
-            const buffer = audioBuffersRef.current[urlToUse];
-            if (buffer) {
-              playSound(buffer);
+          // Play ALL sounds assigned to this pad
+          padToPlay.sounds.forEach(soundToPlay => {
+            const urlToUse = soundToPlay?.downloadUrl; // Use resolved URL
+            if (urlToUse && urlToUse.startsWith('http')) {
+              const cacheKey = urlToUse; // Use resolved URL as cache key
+              const buffer = audioBuffersRef.current[cacheKey];
+              if (buffer) {
+                playSound(buffer);
+              } else {
+                console.warn(`Playback: Buffer for ${urlToUse} not found, attempting load...`);
+                loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
+                  if (loadedBuffer) playSound(loadedBuffer);
+                  else console.error(`Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
+                });
+              }
             } else {
-              console.warn(`Playback: Buffer for ${urlToUse} not found, attempting load...`);
-              loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
-                if (loadedBuffer) playSound(loadedBuffer);
-                else console.error(`Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
-              });
+              console.warn(`Beat: ${padIndex}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No valid download URL. Original: ${soundToPlay?.soundUrl}`);
             }
-          } else {
-            console.warn(`Beat: ${beatIndex}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No valid download URL. Original: ${soundToPlay?.soundUrl}`);
-          }
+          });
         } else {
-           // console.log(`Not playing beat: ${beatIndex}`);
+           // console.log(`Not playing beat: ${padIndex}`);
         }
       };
 
       // Play the first beat immediately
-      playBeat(0);
+      playPadSounds(0);
 
       // Start the interval for subsequent beats
       playbackIntervalRef.current = setInterval(() => {
         setCurrentBeat(prevBeat => {
           const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop through 0-15
-          playBeat(nextBeat);
+          playPadSounds(nextBeat); // Play sounds for the next beat's pad
           return nextBeat; // Update the current beat for the next interval
         });
       }, beatDuration);
@@ -1073,7 +1077,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
                     borderColorClass,
                     hasSounds ? 'shadow-md' : 'hover:bg-muted hover:border-primary/50', // Shadow if sounds exist
                     selectedPadId === pad.id ? 'ring-2 ring-ring ring-offset-2' : '', // Highlight current selected pad (in long-press)
-                    isCurrentBeat ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '', // Highlight only if toggled active
+                    isCurrentBeat && isPadUIToggledActive ? 'ring-4 ring-offset-2 ring-accent shadow-lg scale-105 z-10' : '', // Highlight only if toggled active AND during playback
                     "opacity-0 animate-wave-fall",
                     "overflow-hidden" // Needed for absolute positioned overlays/dots
                   )}
