@@ -6,7 +6,7 @@ export type SoundSource = 'prerecorded' | 'live' | 'uploaded' | 'predefined'; //
 export interface PadSound {
   soundId: string;
   soundName: string; // Store name directly for easier access
-  soundUrl?: string; // Original source path (e.g., from Firestore)
+  soundUrl?: string; // Original source path (e.g., from Firestore, gs://)
   downloadUrl?: string; // Playable URL (e.g., signed URL from Storage)
   source?: SoundSource;
   color?: string; // Color associated with this specific soundId - Made optional
@@ -15,8 +15,8 @@ export interface PadSound {
 export interface Pad {
   id: number;
   sounds: PadSound[]; // Array to hold multiple sounds
-  isActive: boolean; // A pad is active if it has at least one sound and is toggled on
-  currentSoundIndex?: number; // Index of the sound currently displayed/focused in case of multiple sounds
+  isActive: boolean; // State of the pad (used for playback logic, sent to API)
+  currentSoundIndex?: number; // Index of the sound currently displayed/focused (UI state, sent to API)
 }
 
 export interface Comment {
@@ -38,6 +38,8 @@ export interface Fragment {
   bpm?: number; // Beats per minute for playback
   originalAuthor?: string; // If it's a remix
   originalFragmentId?: string; // If it's a remix
+  columns?: number; // Added columns
+  rows?: number; // Added rows
 }
 
 // Updated Sound type to better match API and frontend usage
@@ -54,5 +56,6 @@ export interface Sound {
   previewUrl?: string; // Explicit preview URL (potentially same as downloadUrl or source_url)
   patternStyle?: string; // Optional class for background pattern/animation
 }
+
 
 

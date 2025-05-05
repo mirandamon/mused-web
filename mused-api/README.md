@@ -11,7 +11,7 @@ This Node.js application, running as a Firebase Cloud Function, provides API end
     *   `package.json`: Node.js dependencies for the function.
     *   `src/`: Contains the API logic (routes, Firebase Admin setup).
         *   `firebaseAdmin.js`: Initializes the Firebase Admin SDK.
-        *   `routes/`: Express route handlers (e.g., `sounds.js`).
+        *   `routes/`: Express route handlers (e.g., `sounds.js`, `fragments.js`).
 
 ## Setup (Local Development)
 
@@ -65,7 +65,7 @@ This Node.js application, running as a Firebase Cloud Function, provides API end
 
 The base URL will be your deployed function URL (e.g., `https://us-central1-mused-5ef9f.cloudfunctions.net/api`).
 
-### GET /api/sounds
+### GET /sounds
 
 Fetches a paginated list of sounds from the `sounds` collection in Firestore.
 
@@ -85,7 +85,8 @@ Fetches a paginated list of sounds from the `sounds` collection in Firestore.
           "name": "Deep Kick",
           "owner_user_id": "user_id_abc",
           "source_type": "predefined",
-          "source_url": "/sounds/deep_kick.wav",
+          "source_url": "gs://mused-5ef9f.appspot.com/sounds/deep_kick.wav", // Original gs:// path
+          "downloadUrl": "https://storage.googleapis.com/...", // Signed URL
           "created_at": "2023-10-27T10:00:00.000Z" // ISO String format or null
         },
         // ... more sounds
@@ -100,3 +101,87 @@ Fetches a paginated list of sounds from the `sounds` collection in Firestore.
       "details": "..." // Specific error message
     }
     ```
+
+### POST /fragments
+
+Creates a new music fragment document in the `fragments` collection.
+
+**Request Body:**
+
+```json
+{
+  "pads": [
+    {
+      "id": 0, // Pad index (0-15 for 4x4)
+      "sounds": [
+        {
+          "soundId": "sound_doc_id_1", // Firestore document ID from 'sounds' collection
+          "soundName": "Deep Kick", // Copied from frontend for potential display (not strictly needed for save)
+          "soundUrl": "gs://mused-5ef9f.appspot.com/sounds/deep_kick.wav" // **Important:** Original gs:// path
+          // Note: color, downloadUrl, etc. are UI concerns and not saved here
+        },
+        // ... more sounds for this pad if applicable
+      ],
+      "isActive": true, // State of the pad (used for playback logic)
+      "currentSoundIndex": 0 // Index of the currently selected sound for UI display
+    },
+    // ... more pads that have sounds assigned
+  ],
+  "bpm": 120, // Beats per minute
+  "title": "My Awesome Beat", // Optional title
+  "columns": 4, // Optional, defaults to 4
+  "rows": 4, // Optional, defaults to 4
+  "originalAuthorId": null, // Or string if it's a remix
+  "originalFragmentId": null // Or string if it's a remix
+}
+
+```
+
+**Response:**
+
+*   **Success (201 Created):**
+    ```json
+    {
+      "message": "Fragment created successfully",
+      "fragmentId": "new_fragment_doc_id"
+    }
+    ```
+*   **Error (400 Bad Request):** If validation fails.
+    ```json
+    {
+      "error": "Invalid input data.",
+      "details": ["Field 'pads' must be a non-empty array.", "..."]
+    }
+    ```
+*   **Error (500 Internal Server Error):** If Firestore operation fails.
+    ```json
+    {
+      "error": "Failed to create fragment",
+      "details": "..." // Specific error message
+    }
+    ```
+
+**Firestore Document Structure (`fragments` collection):**
+
+```json
+{
+  "author_id": "0", // Placeholder, replace with actual auth user ID
+  "author_name": "Staff", // Placeholder, replace with actual auth user name
+  "bpm": 120,
+  "columns": 4,
+  "rows": 4,
+  "title": "My Awesome Beat", // or null
+  "original_author_id": null, // or string
+  "original_fragment_id": null, // or string
+  "created_at": Timestamp(...), // Firestore Timestamp
+  "updated_at": Timestamp(...), // Firestore Timestamp
+  "view_count": 0,
+  "pad_sounds": { // Map where key is pad index (string), value is array of sound IDs
+    "0": ["sound_doc_id_1"],
+    "2": ["sound_doc_id_1", "sound_doc_id_clap"],
+    "5": ["sound_doc_id_hihat"],
+    "13": ["sound_doc_id_bass", "sound_doc_id_fx"]
+    // Only pads with sounds are included
+  }
+}
+```

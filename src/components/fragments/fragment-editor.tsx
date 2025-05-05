@@ -58,7 +58,7 @@ const colorPalette: string[] = [
 
 interface FragmentEditorProps {
   initialPads?: Pad[];
-  originalAuthor?: string;
+  originalAuthor?: string; // Changed from originalAuthorId
   originalFragmentId?: string;
 }
 
@@ -144,6 +144,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const touchStartXRef = useRef<number>(0); // For swipe detection
   const currentSwipingPadIdRef = useRef<number | null>(null); // Track which pad is being swiped
   const swipeHandledRef = useRef<boolean>(false); // Flag to prevent click after swipe
+  const [isPosting, setIsPosting] = useState(false); // State for loading indicator
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
@@ -212,8 +213,15 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
         // Check if it's a gs:// URL
         if (!gsOrPath.startsWith('gs://')) {
-           console.warn(`resolveGsUrlToDownloadUrl: Provided path is not a gs:// URL: ${gsOrPath}`);
-           return null; // Only resolve gs:// URLs for now
+           console.warn(`resolveGsUrlToDownloadUrl: Provided path is not a gs:// URL: ${gsOrPath}. Treating as relative path.`);
+           // Assume it might be a relative path (though unlikely now without presets)
+           // If it starts with '/', prepend origin. Otherwise, use as is (might fail)
+           if (gsOrPath.startsWith('/') && typeof window !== 'undefined') {
+                return window.location.origin + gsOrPath;
+           }
+           // If it's not relative and not gs://, it's likely invalid.
+           console.error(`resolveGsUrlToDownloadUrl: Invalid path format: ${gsOrPath}`);
+           return null;
         }
 
         try {
@@ -417,7 +425,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
          }
 
    // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [rawInitialPads, resolveGsUrlToDownloadUrl, loadAudio]); // Include resolvers/loaders
+   }, [rawInitialPads]); // Removed resolvers/loaders, they are stable
 
 
    // Preload sounds when pads data changes (ensure URLs are resolved)
@@ -495,26 +503,26 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           // Short press action: Play sound if pad is active
           const pad = pads.find(p => p.id === id);
            if (pad?.isActive && pad.sounds.length > 0) {
-               const soundToPlay = pad.sounds[pad.currentSoundIndex ?? 0];
-               // *** Use resolved downloadUrl first for playing ***
-               const urlToUse = soundToPlay?.downloadUrl; // Get the resolved URL
-
-               if (urlToUse && urlToUse.startsWith('http')) {
-                    const cacheKey = urlToUse; // Use resolved URL as cache key
-                    const buffer = audioBuffersRef.current[cacheKey]; // Check cache using HTTPS URL
-                    if (buffer) {
-                       playSound(buffer);
-                   } else {
-                       console.warn(`Buffer for ${urlToUse} not found, attempting load...`);
-                       // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
-                       loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
-                           if (loadedBuffer) playSound(loadedBuffer);
-                           else console.error(`Failed to load buffer on demand for ${urlToUse}`);
-                       });
-                   }
-               } else {
-                 console.warn(`Pad ${id}: No valid download URL found for sound ${soundToPlay?.soundName}. Original: ${soundToPlay?.soundUrl}`);
-               }
+               // Play ALL sounds on the pad simultaneously on short press
+               pad.sounds.forEach(soundToPlay => {
+                    const urlToUse = soundToPlay?.downloadUrl; // Get the resolved URL
+                     if (urlToUse && urlToUse.startsWith('http')) {
+                          const cacheKey = urlToUse; // Use resolved URL as cache key
+                          const buffer = audioBuffersRef.current[cacheKey]; // Check cache using HTTPS URL
+                          if (buffer) {
+                             playSound(buffer);
+                         } else {
+                             console.warn(`Buffer for ${urlToUse} not found, attempting load...`);
+                             // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
+                             loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
+                                 if (loadedBuffer) playSound(loadedBuffer);
+                                 else console.error(`Failed to load buffer on demand for ${urlToUse}`);
+                             });
+                         }
+                     } else {
+                       console.warn(`Pad ${id}: No valid download URL found for sound ${soundToPlay?.soundName}. Original: ${soundToPlay?.soundUrl}`);
+                     }
+               });
            }
       }
     }
@@ -542,25 +550,26 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
              // Short press action: Play sound if pad is active
              const pad = pads.find(p => p.id === id);
               if (pad?.isActive && pad.sounds.length > 0) {
-                  const soundToPlay = pad.sounds[pad.currentSoundIndex ?? 0];
-                  // *** Use resolved downloadUrl first for playing ***
-                  const urlToUse = soundToPlay?.downloadUrl;
-                  if (urlToUse && urlToUse.startsWith('http')) {
-                       const cacheKey = urlToUse; // Use resolved URL as cache key
-                       const buffer = audioBuffersRef.current[cacheKey];
-                       if (buffer) {
-                        playSound(buffer);
-                      } else {
-                           console.warn(`Buffer for ${urlToUse} not found (touch), attempting load...`);
-                           // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
-                          loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
-                              if (loadedBuffer) playSound(loadedBuffer);
-                              else console.error(`Failed to load buffer on demand for ${urlToUse} (touch)`);
-                          });
-                      }
-                  } else {
-                     console.warn(`Pad ${id} (touch): No valid download URL found for sound ${soundToPlay?.soundName}. Original: ${soundToPlay?.soundUrl}`);
-                  }
+                   // Play ALL sounds on the pad simultaneously
+                  pad.sounds.forEach(soundToPlay => {
+                       const urlToUse = soundToPlay?.downloadUrl;
+                       if (urlToUse && urlToUse.startsWith('http')) {
+                            const cacheKey = urlToUse; // Use resolved URL as cache key
+                            const buffer = audioBuffersRef.current[cacheKey];
+                            if (buffer) {
+                             playSound(buffer);
+                           } else {
+                                console.warn(`Buffer for ${urlToUse} not found (touch), attempting load...`);
+                                // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
+                               loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
+                                   if (loadedBuffer) playSound(loadedBuffer);
+                                   else console.error(`Failed to load buffer on demand for ${urlToUse} (touch)`);
+                               });
+                           }
+                       } else {
+                          console.warn(`Pad ${id} (touch): No valid download URL found for sound ${soundToPlay?.soundName}. Original: ${soundToPlay?.soundUrl}`);
+                       }
+                  });
               }
         }
      }
@@ -755,63 +764,105 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   }
 
    const handlePostFragment = async () => {
-    if (isPlaying) {
-        handlePlayPause(); // Stop playback before posting
-    }
-    const hasSound = pads.some(p => p.sounds.length > 0); // Check if any pad has sounds, regardless of active state
-    if (!hasSound) {
-        setTimeout(() => {
-            toast({
-                variant: "destructive",
-                title: "Empty Fragment",
-                description: "Add at least one sound to a pad before posting.",
-            });
-        }, 0);
-        return;
-    }
+       if (isPlaying) {
+           handlePlayPause(); // Stop playback before posting
+       }
+       const hasSound = pads.some(p => p.sounds.length > 0);
+       if (!hasSound) {
+           setTimeout(() => {
+               toast({
+                   variant: "destructive",
+                   title: "Empty Fragment",
+                   description: "Add at least one sound to a pad before posting.",
+               });
+           }, 0);
+           return;
+       }
 
-    console.log("Posting Fragment:", { pads, bpm, originalAuthor, originalFragmentId });
+       setIsPosting(true); // Start loading state
 
-    // TODO: Implement actual saving logic here
-    // 1. Prepare data for saving (ensure soundUrl is the original gs:// path or identifier, not the temporary downloadUrl)
-    const padsToSave = pads.map(pad => ({
-        ...pad,
-        sounds: pad.sounds.map(sound => ({
-            soundId: sound.soundId,
-            soundName: sound.soundName,
-            soundUrl: sound.soundUrl, // Save the ORIGINAL gs:// path
-            source: sound.source,
-            // Color is a UI concern, maybe don't save it, or save assigned color ID?
-        })),
-        // Ensure currentSoundIndex is saved if needed for default state on load
-    }));
-    const fragmentData = {
-        pads: padsToSave,
-        bpm,
-        author: "CurrentUser", // Replace with actual auth user ID/name
-        timestamp: new Date(), // Use server timestamp in real implementation
-        ...(originalFragmentId && { originalFragmentId, originalAuthor }), // Add remix info if applicable
-        // Add title if you have an input for it
-    };
+       // Prepare data for saving (ensure soundUrl is the original gs:// path or identifier)
+       const padsToSave = pads
+           .filter(pad => pad.sounds.length > 0) // Only include pads that have sounds
+           .map(pad => ({
+               id: pad.id, // Pad index (0-15)
+               isActive: pad.isActive, // Save active state
+               currentSoundIndex: pad.currentSoundIndex ?? 0, // Save index
+               sounds: pad.sounds.map(sound => ({
+                   soundId: sound.soundId,
+                   soundName: sound.soundName, // Include name for easier debugging/display later
+                   soundUrl: sound.soundUrl, // Save the ORIGINAL gs:// path or other identifier
+                   // Omit downloadUrl, color, source - these are derived/UI concerns
+               })),
+           }));
 
-    console.log("Data to save:", fragmentData);
+       const fragmentData = {
+           pads: padsToSave,
+           bpm,
+           // Placeholder title - consider adding an Input field later
+           title: "My New Fragment",
+           // Remix info (if applicable)
+           originalAuthorId: originalAuthor ? "AuthorIDPlaceholder" : null, // Need actual ID if remixing
+           originalFragmentId: originalFragmentId || null,
+           // Assuming 4x4 grid for now
+           columns: 4,
+           rows: 4,
+       };
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
+       console.log("Posting fragment data:", fragmentData);
 
-    // Show success toast after simulated post
-    setTimeout(() => {
-        toast({
-          title: "Fragment Posted!",
-          description: originalFragmentId ? `Your remix of ${originalAuthor}'s fragment is live.` : "Your new fragment is live.",
-          action: (
-             <Button variant="outline" size="sm" onClick={() => window.location.href = '/'}>
-                View Feed
-             </Button>
-          ),
-        });
-    }, 0);
-  };
+       try {
+           const apiUrl = process.env.NEXT_PUBLIC_MUSED_API_URL;
+           if (!apiUrl) {
+               throw new Error("API URL is not configured.");
+           }
+           const endpoint = `${apiUrl}/fragments`;
+
+           const response = await fetch(endpoint, {
+               method: 'POST',
+               headers: {
+                   'Content-Type': 'application/json',
+                   // Add authorization headers if needed later
+               },
+               body: JSON.stringify(fragmentData),
+           });
+
+           if (!response.ok) {
+               const errorData = await response.json().catch(() => ({ error: "Failed to post fragment", details: response.statusText }));
+               throw new Error(errorData.details || errorData.error || `HTTP error! status: ${response.status}`);
+           }
+
+           const result = await response.json();
+           console.log("Fragment posted successfully:", result);
+
+           setTimeout(() => {
+               toast({
+                   title: "Fragment Posted!",
+                   description: originalFragmentId ? `Your remix of ${originalAuthor}'s fragment is live.` : "Your new fragment is live.",
+                   action: (
+                       <Button variant="outline" size="sm" onClick={() => window.location.href = '/'}>
+                           View Feed
+                       </Button>
+                   ),
+               });
+               // Optional: Reset editor state or navigate away
+               // setPads(defaultPads); // Example: Reset pads
+           }, 0);
+
+       } catch (error: any) {
+           console.error("Error posting fragment:", error);
+           setTimeout(() => {
+               toast({
+                   variant: "destructive",
+                   title: "Post Failed",
+                   description: error.message || "Could not post the fragment. Please try again.",
+               });
+           }, 0);
+       } finally {
+           setIsPosting(false); // End loading state
+       }
+   };
+
 
   // --- Playback Logic ---
 
@@ -1219,9 +1270,21 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
           </div>
         </CardContent>
         <CardFooter className="flex justify-end p-4 border-t mt-4">
-          <Button onClick={handlePostFragment} disabled={isPlaying}>
-             <Check className="mr-2 h-4 w-4" />
-             {originalFragmentId ? 'Post Remix' : 'Post Fragment'}
+          <Button onClick={handlePostFragment} disabled={isPlaying || isPosting}>
+             {isPosting ? (
+                 <div className="flex items-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Posting...
+                 </div>
+              ) : (
+                 <>
+                    <Check className="mr-2 h-4 w-4" />
+                    {originalFragmentId ? 'Post Remix' : 'Post Fragment'}
+                 </>
+              )}
           </Button>
         </CardFooter>
       </Card>

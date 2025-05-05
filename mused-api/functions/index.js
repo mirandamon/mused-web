@@ -4,6 +4,7 @@ const admin = require('firebase-admin'); // Although initialized in firebaseAdmi
 const express = require('express');
 const cors = require('cors');
 const soundsRouter = require('./src/routes/sounds');
+const fragmentsRouter = require('./src/routes/fragments'); // Import the new fragments router
 
 // Initialize Firebase Admin SDK (runs when function cold starts)
 // If firebaseAdmin.js is required elsewhere, this ensures initialization.
@@ -30,7 +31,8 @@ app.use(express.json());
 const { db } = require('./src/firebaseAdmin'); // db might be needed by routes directly
 
 // API Routes - The base URL will be the function URL (e.g., .../api)
-app.use('/sounds', soundsRouter); // Mount soundsRouter at /sounds relative to the function URL
+app.use('/sounds', soundsRouter); // Mount soundsRouter at /sounds
+app.use('/fragments', fragmentsRouter); // Mount fragmentsRouter at /fragments
 
 // Root endpoint for testing the base path
 app.get('/', (req, res) => {

@@ -17,6 +17,7 @@
     "api",
     "firestore",
     "sounds",
+    "fragments",
     "mused",
     "firebase",
     "cloud-functions"
@@ -32,3 +33,4 @@
   },
   "private": true
 }
+
