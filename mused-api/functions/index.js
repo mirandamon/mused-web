@@ -4,7 +4,7 @@ const admin = require('firebase-admin'); // Although initialized in firebaseAdmi
 const express = require('express');
 const cors = require('cors');
 const soundsRouter = require('./src/routes/sounds');
-const fragmentsRouter = require('./src/routes/fragments'); // Import the new fragments router
+const fragmentsRouter = require('./src/routes/fragments'); // Ensure fragments router is imported
 
 // Initialize Firebase Admin SDK (runs when function cold starts)
 // If firebaseAdmin.js is required elsewhere, this ensures initialization.
@@ -28,15 +28,16 @@ app.use(cors({ origin: true })); // Allows all origins, suitable for development
 app.use(express.json());
 
 // Import routes (ensure the path is correct relative to index.js)
-const { db } = require('./src/firebaseAdmin'); // db might be needed by routes directly
+// db might be needed by routes directly, but firebaseAdmin usually exports it
+// const { db } = require('./src/firebaseAdmin');
 
 // API Routes - The base URL will be the function URL (e.g., .../api)
 app.use('/sounds', soundsRouter); // Mount soundsRouter at /sounds
 app.use('/fragments', fragmentsRouter); // Mount fragmentsRouter at /fragments
 
-// Root endpoint for testing the base path
+// Root endpoint for testing the base path of the 'api' function
 app.get('/', (req, res) => {
-    res.send('Mused API is running via Cloud Functions! Base / reached.');
+    res.status(200).send('Mused API base endpoint reached successfully!');
 });
 
 

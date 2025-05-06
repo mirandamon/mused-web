@@ -23,39 +23,41 @@ export interface Comment {
   id: string;
   author: string;
   text: string;
-  timestamp: Date;
+  timestamp: Date | string; // Allow ISO string from API
 }
 
 export interface Fragment {
   id: string;
   author: string;
+  authorId?: string; // Added author ID from API
   authorAvatar?: string; // Optional: URL to author's avatar
-  timestamp: Date;
+  timestamp: Date | string; // Allow ISO string from API
   pads: Pad[];
   likes: number;
-  comments: Comment[];
+  comments: Comment[]; // Comments fetched separately
+  commentsCount?: number; // Added comment count from API
   title?: string; // Optional title for the fragment
   bpm?: number; // Beats per minute for playback
   originalAuthor?: string; // If it's a remix
+  originalAuthorId?: string; // Added original author ID from API
   originalFragmentId?: string; // If it's a remix
   columns?: number; // Added columns
   rows?: number; // Added rows
+  viewCount?: number; // Added view count from API
 }
 
 // Updated Sound type to better match API and frontend usage
 export interface Sound {
   id: string;
   name: string;
-  type: 'preset' | 'marketplace' | 'recorded' | 'uploaded' | 'predefined'; // More specific type based on source_type or frontend context
+  // type is derived client-side or based on context, not directly from API's source_type usually
+  type: 'preset' | 'marketplace' | 'recorded' | 'uploaded' | 'predefined';
   owner_user_id?: string; // From API
   source_type?: SoundSource; // From API
-  source_url?: string; // From API (Storage path)
-  downloadUrl?: string; // From API (Signed download URL)
+  source_url?: string; // From API (Storage path, gs://)
+  downloadUrl?: string; // From API (Signed download URL, HTTPS)
   created_at?: string; // From API (ISO string)
-  author?: string; // For marketplace/API sounds (derived from owner_user_id)
-  previewUrl?: string; // Explicit preview URL (potentially same as downloadUrl or source_url)
+  author?: string; // For marketplace/API sounds (derived from owner_user_id or pre-set)
+  previewUrl?: string; // Explicit preview URL (potentially same as downloadUrl or source_url AFTER resolution)
   patternStyle?: string; // Optional class for background pattern/animation
 }
-
-
-

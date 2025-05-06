@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Import Tooltip components
 // Import the client-side color helper
 import { getOrAssignSoundColor } from './fragment-editor';
-import { getStorage, ref, getDownloadURL } from 'firebase/storage'; // Correct Firebase Storage imports
+import { ref, getDownloadURL } from "firebase/storage"; // Correct Firebase Storage imports
 import { storage } from "@/lib/firebase/clientApp"; // Import client storage instance
 
 interface FragmentPostProps {
@@ -24,14 +24,19 @@ interface FragmentPostProps {
 }
 
 // Global map to cache audio buffers across different post components
+// Ensure this map is accessible within the component's scope or managed via context/global state
 const globalAudioBuffers: { [url: string]: AudioBuffer } = {};
-// Global audio context (potentially shared, or manage per component instance)
+
+// --- Client-side Audio Context Initialization ---
+// Check if running in a browser environment before accessing window
+const isBrowser = typeof window !== 'undefined';
+
 let globalAudioContext: AudioContext | null = null;
 let globalGainNode: GainNode | null = null;
 let isGlobalAudioContextInitialized = false;
 
 const initializeGlobalAudioContext = () => {
-    if (typeof window !== 'undefined' && !isGlobalAudioContextInitialized) {
+    if (isBrowser && !isGlobalAudioContextInitialized) {
         try {
             globalAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
             globalGainNode = globalAudioContext.createGain();
@@ -47,13 +52,15 @@ const initializeGlobalAudioContext = () => {
 
 
 export default function FragmentPost({ fragment: initialFragment }: FragmentPostProps) {
-  const [fragment, setFragment] = useState<Fragment>(initialFragment); // State to hold processed fragment
+  // Use the initialFragment directly, assuming processing happens before render or within useEffect
+  const [fragment, setFragment] = useState<Fragment>(initialFragment);
   const [isLiked, setIsLiked] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
-  const [comments, setComments] = useState<Comment[]>(initialFragment.comments || []); // Ensure comments is an array
-  const [likeCount, setLikeCount] = useState(initialFragment.likes || 0); // Ensure likes is a number
+  // Use comments count from API, actual comments need separate fetch
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [likeCount, setLikeCount] = useState(initialFragment.likes || 0);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
   const [isMuted, setIsMuted] = useState(false); // Mute state for this post
 
@@ -65,169 +72,55 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
      initializeGlobalAudioContext();
      // Check initial mute state if global gain node exists
      if (globalGainNode) {
-        setIsMuted(globalGainNode.gain.value < 0.5); // Approximate check
+        setIsMuted(globalGainNode.gain.value < 0.1); // Check if gain is near zero
      }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-   /**
-    * Asynchronously resolves a gs:// URL or path to an HTTPS download URL.
-    * @param gsOrPath The gs:// URL or storage path.
-    * @returns Promise resolving to the HTTPS URL or null if resolution fails.
-    */
-    const resolveGsUrlToDownloadUrl = useCallback(async (gsOrPath: string): Promise<string | null> => {
-      if (!gsOrPath || !gsOrPath.startsWith('gs://')) {
-        console.warn(`Post resolveGsUrl: Provided path is not a gs:// URL: ${gsOrPath}`);
-        return null; // Only handle gs:// URLs
-      }
-      try {
-        const storageRef = ref(storage, gsOrPath); // Use ref from firebase/storage
-        const downloadUrl = await getDownloadURL(storageRef);
-        console.log(`Post Resolved ${gsOrPath} to ${downloadUrl}`);
-        return downloadUrl;
-      } catch (error) {
-        console.error(`Post Failed to get download URL for ${gsOrPath}:`, error);
-        // Use setTimeout to avoid calling toast during render phase
-        setTimeout(() => {
-           toast({
-             variant: "destructive",
-             title: "URL Resolution Error",
-             description: `Could not get playable URL for ${gsOrPath.split('/').pop() || 'sound'}.`,
-           });
-        }, 0);
-        return null;
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [storage]); // Dependency on storage instance (and toast via setTimeout)
-
-   // Process fragment pads on mount to resolve gs:// URLs and assign colors
-   useEffect(() => {
-       const processFragmentAsync = async () => {
-            if (!initialFragment?.pads) {
-                console.warn("FragmentPost: Initial fragment or pads missing.");
-                return;
-            }
-           const processedPadsPromises = initialFragment.pads.map(async (pad): Promise<Pad> => {
-               const processedSoundsPromises = (pad.sounds || []).map(async (sound): Promise<PadSound | null> => {
-                   let playableUrl = sound.downloadUrl; // Already resolved URL from API?
-                   const originalSourceUrl = sound.soundUrl; // Original path (gs:// or relative)
-
-                   // **Resolve gs:// URL if necessary**
-                   if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('gs://')) {
-                        console.log(`Post Load: Resolving gs:// URL: ${originalSourceUrl}`);
-                        playableUrl = await resolveGsUrlToDownloadUrl(originalSourceUrl);
-                        if (!playableUrl) {
-                           console.warn(`Post Load: Failed to resolve gs:// URL ${originalSourceUrl}. Sound may not play.`);
-                        }
-                   } else if (!playableUrl && originalSourceUrl && originalSourceUrl.startsWith('/')) {
-                       // Legacy preset path - might be invalid
-                       console.warn(`Post Load: Found relative path ${originalSourceUrl}. Assuming preset (might be removed). Using path as potential playable URL.`);
-                       playableUrl = originalSourceUrl; // Use relative path (might 404)
-                   }
-
-                    if (!playableUrl) {
-                        console.warn(`Post Load: Sound ${sound.soundName || sound.soundId} missing valid playable URL. Original: ${originalSourceUrl}`);
-                    } else {
-                       // Preload audio after potential resolution
-                       // Pass original for cache key, playable for fetching
-                       loadAudio(originalSourceUrl || playableUrl, playableUrl);
-                    }
-
-                   return {
-                       ...sound,
-                       soundUrl: originalSourceUrl, // Keep original path
-                       downloadUrl: playableUrl, // Store resolved or original playable URL
-                       // Assign color on the client using the imported helper
-                       color: sound.color || getOrAssignSoundColor(sound.soundId)
-                   };
-               });
-               const processedSounds = (await Promise.all(processedSoundsPromises)).filter(s => s !== null) as PadSound[];
-
-               return {
-                   ...pad,
-                   sounds: processedSounds,
-               };
-           });
-           const processedPads = await Promise.all(processedPadsPromises);
-           setFragment({ ...initialFragment, pads: processedPads });
-       };
-
-       processFragmentAsync();
-       // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [initialFragment, resolveGsUrlToDownloadUrl]); // Re-run when initialFragment or resolver changes
 
 
   // --- Audio Loading (uses global cache) ---
    const loadAudio = useCallback(async (originalUrl: string, downloadUrl?: string): Promise<AudioBuffer | null> => {
-       if (!globalAudioContext) {
-          console.warn("Post loadAudio: Audio context not ready.");
-          return null;
-       }
-        if (!originalUrl && !downloadUrl) {
-            console.warn("Post loadAudio: Both originalUrl and downloadUrl are missing.");
-            return null;
+        if (!isBrowser) return null; // Don't run on server
+        if (!globalAudioContext) {
+            console.warn("Post loadAudio: Audio context not ready.");
+            initializeGlobalAudioContext(); // Attempt lazy initialization
+            if (!globalAudioContext) return null;
         }
 
-       // **Determine the URL to fetch:** Prioritize provided downloadUrl, resolve originalUrl if needed.
-       let fetchUrl = downloadUrl; // Start with the potentially already resolved URL
+       const urlToFetch = downloadUrl || originalUrl; // Use downloadUrl if available, otherwise assume originalUrl might be HTTPS already (or needs resolving - though API provides it now)
 
-       // If no downloadUrl provided or it's invalid, and originalUrl is gs://, try resolving it.
-       if ((!fetchUrl || !fetchUrl.startsWith('http')) && originalUrl && originalUrl.startsWith('gs://')) {
-           console.log(`Post loadAudio: Resolving gs:// URL: ${originalUrl}`);
-           fetchUrl = await resolveGsUrlToDownloadUrl(originalUrl);
-           if (!fetchUrl) {
-               console.error(`Post loadAudio: Failed to resolve gs:// URL ${originalUrl}. Cannot load audio.`);
-               return null; // Stop if resolution failed
-           }
-       } else if (originalUrl && originalUrl.startsWith('/') && typeof window !== 'undefined') {
-           // Handle legacy relative paths (potential presets)
-           fetchUrl = window.location.origin + originalUrl;
-           console.warn(`Post loadAudio: Using relative path (potential preset): ${fetchUrl}`);
-       } else if (!fetchUrl || !fetchUrl.startsWith('http')) {
-            // If after all checks, fetchUrl is still invalid, log error and exit.
-            console.error(`Post loadAudio: Invalid or non-HTTP(S) URL provided: ${fetchUrl || originalUrl}`);
-             setTimeout(() => {
-               toast({
-                   variant: "destructive",
-                   title: "Audio Load Error",
-                   description: `Cannot load sound from invalid URL: ${fetchUrl || originalUrl}`,
-               });
-             }, 0);
-            return null;
+        // **Check Cache:** Use the RESOLVED fetchUrl as the primary cache key.
+        if (globalAudioBuffers[urlToFetch]) {
+            // console.log(`Post loadAudio: Returning cached buffer for ${urlToFetch}`);
+            return globalAudioBuffers[urlToFetch];
         }
 
-       // **Check Cache:** Use the RESOLVED fetchUrl as the primary cache key.
-       if (globalAudioBuffers[fetchUrl]) {
-           // console.log(`Post loadAudio: Returning cached buffer for ${fetchUrl}`);
-           return globalAudioBuffers[fetchUrl];
+       // Basic check if urlToFetch is valid HTTPS
+       if (!urlToFetch || !urlToFetch.startsWith('http')) {
+           console.error(`Post loadAudio: Invalid or non-HTTPS URL provided: ${urlToFetch}. Original was: ${originalUrl}`);
+           // No toast here, error handled during fetch attempt or playback
+           return null;
        }
 
 
       // **Fetch and Decode Audio:**
-      console.log(`Post loadAudio: Attempting to fetch audio from: ${fetchUrl}`);
+      console.log(`Post loadAudio: Attempting to fetch audio from: ${urlToFetch}`);
       try {
-          const response = await fetch(fetchUrl);
+          const response = await fetch(urlToFetch);
           if (!response.ok) {
-               console.error(`Post loadAudio: HTTP error! status: ${response.status} for URL ${fetchUrl}`);
-               // Handle 404 for potentially removed presets
-               if (response.status === 404 && originalUrl?.startsWith('/')) {
-                  console.warn(`Post loadAudio: Preset sound likely removed (${originalUrl}).`);
-               }
+               console.error(`Post loadAudio: HTTP error! status: ${response.status} for URL ${urlToFetch}`);
                return null; // Don't throw, just return null on fetch error
           }
           const arrayBuffer = await response.arrayBuffer();
           const audioBuffer = await globalAudioContext.decodeAudioData(arrayBuffer);
 
           // **Cache the buffer:** Use the RESOLVED fetchUrl as the key.
-          globalAudioBuffers[fetchUrl] = audioBuffer;
-          // Optionally, also cache by original gs:// URL if needed
-          // if (originalUrl && originalUrl !== fetchUrl) {
-          //    globalAudioBuffers[originalUrl] = audioBuffer;
-          // }
+          globalAudioBuffers[urlToFetch] = audioBuffer;
 
-          console.log(`Post loadAudio: Audio loaded and decoded successfully: ${fetchUrl}`);
+          console.log(`Post loadAudio: Audio loaded and decoded successfully: ${urlToFetch}`);
           return audioBuffer;
       } catch (error: any) {
-          console.error(`Post loadAudio: Error loading or decoding audio file ${originalUrl || downloadUrl} (fetching from ${fetchUrl}):`, error);
+          console.error(`Post loadAudio: Error loading or decoding audio file ${originalUrl || downloadUrl} (fetching from ${urlToFetch}):`, error);
            setTimeout(() => {
              toast({
                variant: "destructive",
@@ -237,26 +130,49 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
           }, 0);
           return null;
       }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolveGsUrlToDownloadUrl]); // Dependency on toast
+   }, [toast]); // Dependency on toast
 
-  // Preload sounds for this fragment when it becomes visible or data changes
-  useEffect(() => {
-      fragment?.pads?.forEach(pad => {
-          pad.sounds?.forEach(sound => {
-              // Prioritize downloadUrl, fallback to soundUrl (which might be gs://)
-              const urlToLoad = sound.downloadUrl || sound.soundUrl;
-              if (urlToLoad) {
-                  // console.log(`Post Preloading: ${sound.soundName} using URL: ${urlToLoad}`);
-                  // Pass original soundUrl for potential caching, downloadUrl for fetching
-                  loadAudio(sound.soundUrl || urlToLoad, sound.downloadUrl);
-              } else {
-                  // Log if no URL found for preloading
-                  console.warn(`Post Preloading: Sound ${sound.soundName} missing any URL (downloadUrl or soundUrl).`);
-              }
-          });
-      });
-  }, [fragment?.pads, loadAudio]);
+    // Process fragment pads on mount or when initialFragment changes
+    // Assign colors and preload audio
+   useEffect(() => {
+       const processFragmentPads = async () => {
+           if (!initialFragment?.pads) {
+               console.warn("FragmentPost: Initial fragment or pads missing.");
+               return;
+           }
+
+           const processedPadsPromises = initialFragment.pads.map(async (pad): Promise<Pad> => {
+               const processedSoundsPromises = (pad.sounds || []).map(async (sound): Promise<PadSound> => { // Assume sound is valid if present
+                   const assignedColor = getOrAssignSoundColor(sound.soundId); // Assign color client-side
+
+                   // Preload audio using the downloadUrl provided by the API
+                   if (sound.downloadUrl) {
+                       loadAudio(sound.soundUrl || sound.downloadUrl, sound.downloadUrl);
+                   } else {
+                       console.warn(`Post Process: Sound ${sound.soundName} missing downloadUrl. Cannot preload.`);
+                   }
+
+                   return {
+                       ...sound,
+                       color: assignedColor // Ensure color is assigned
+                   };
+               });
+               const processedSounds = await Promise.all(processedSoundsPromises);
+
+               return {
+                   ...pad,
+                   sounds: processedSounds,
+               };
+           });
+           const processedPads = await Promise.all(processedPadsPromises);
+           // Update the local fragment state with processed pads
+           setFragment(currentFragment => ({ ...currentFragment, pads: processedPads }));
+       };
+
+       processFragmentPads();
+       // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [initialFragment, loadAudio]); // Re-run only when initialFragment or loadAudio changes
+
 
    // --- Audio Playback (uses global context/gain) ---
    const playSound = useCallback((buffer: AudioBuffer) => {
@@ -278,7 +194,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
        if (!globalAudioContext || !globalGainNode) return;
 
        const currentGain = globalGainNode.gain.value;
-       const isCurrentlyMuted = currentGain < 0.5; // Check if effectively muted
+       const isCurrentlyMuted = currentGain < 0.1; // Check if effectively muted
        const targetGain = isCurrentlyMuted ? 1.0 : 0.0001; // Target 1 for unmute, near 0 for mute
        const newMutedState = !isCurrentlyMuted;
 
@@ -293,6 +209,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
 
 
   const handleLike = () => {
+    // TODO: Implement actual API call for liking/unliking
     setIsLiked(!isLiked);
     setLikeCount(prev => isLiked ? prev - 1 : prev + 1);
      setTimeout(() => {
@@ -315,12 +232,11 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
 
   const startPlayback = useCallback(() => {
       if (!globalAudioContext) {
-          // Don't toast here, initialize might handle it or console log
           console.error("Post startPlayback: Audio context not initialized.");
           return;
       }
       if (globalAudioContext.state === 'suspended') {
-           globalAudioContext.resume();
+           globalAudioContext.resume().catch(e => console.error("Error resuming audio context:", e));
       }
 
     if (playbackIntervalRef.current) {
@@ -330,41 +246,54 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
     setCurrentBeat(0);
 
     const bpm = fragment?.bpm || 120;
-    const beatDuration = (60 / bpm) * 1000;
+    // Calculate beat duration based on 16 beats per fragment loop
+    const loopDurationMs = (60 / bpm) * 16 * 1000;
+    const beatDuration = loopDurationMs / 16;
+
+
+      // Helper function to play sounds for the current beat index
+      const playBeatSounds = (beatIndex: number) => {
+        const padToPlay = fragment?.pads?.[beatIndex]; // Find the pad corresponding to the beat index
+
+        if (padToPlay?.isActive && padToPlay.sounds?.length > 0) {
+            // Play ALL sounds assigned to this active pad
+            padToPlay.sounds.forEach(soundToPlay => {
+                // *** Use resolved downloadUrl for playing ***
+                const urlToUse = soundToPlay?.downloadUrl;
+
+                if (urlToUse && urlToUse.startsWith('http')) {
+                    const buffer = globalAudioBuffers[urlToUse]; // Check cache with HTTPS URL
+                    if (buffer) {
+                       playSound(buffer);
+                    } else {
+                        // Attempt to load if not found (might be slightly delayed)
+                        console.warn(`Post Playback: Buffer for ${urlToUse} not found, attempting load...`);
+                        // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
+                        loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
+                            if (loadedBuffer) playSound(loadedBuffer);
+                            else console.error(`Post Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
+                        });
+                    }
+                } else {
+                    // Log if no valid URL is found for the sound to be played
+                    console.warn(`Post Playback Beat: ${beatIndex}, Sound: ${soundToPlay?.soundName} - No valid download URL found. Original: ${soundToPlay?.soundUrl}`);
+                }
+            });
+        }
+      };
+
+      // Play the first beat immediately
+      playBeatSounds(0);
+
 
     playbackIntervalRef.current = setInterval(() => {
       setCurrentBeat(prevBeat => {
-        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16;
-        const padToPlay = fragment?.pads?.[nextBeat]; // Safely access pads
-
-        if (padToPlay?.isActive && padToPlay.sounds?.length > 0) {
-            const soundToPlay = padToPlay.sounds[padToPlay.currentSoundIndex ?? 0];
-            // *** Use resolved downloadUrl first for playing ***
-            const urlToUse = soundToPlay?.downloadUrl; // Get best available URL
-
-            if (urlToUse && urlToUse.startsWith('http')) {
-                const buffer = globalAudioBuffers[urlToUse]; // Check cache with HTTPS URL
-               if (buffer) {
-                  playSound(buffer);
-               } else {
-                   // Attempt to load if not found (might be slightly delayed)
-                   console.warn(`Post Playback: Buffer for ${urlToUse} not found, attempting load...`);
-                   // Pass original soundUrl for cache key, urlToUse (HTTPS) for fetching
-                   loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
-                       if (loadedBuffer) playSound(loadedBuffer);
-                       else console.error(`Post Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
-                   });
-               }
-            } else {
-                // Log if no valid URL is found for the sound to be played
-                 console.warn(`Post Playback Beat: ${nextBeat}, Sound: ${soundToPlay?.soundName} - No valid download URL found. Original: ${soundToPlay?.soundUrl}`);
-            }
-        }
+        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop 0-15
+        playBeatSounds(nextBeat);
         return nextBeat;
       });
     }, beatDuration);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fragment?.bpm, fragment?.pads, playSound, loadAudio]); // Depend on fragment parts
+  }, [fragment?.bpm, fragment?.pads, playSound, loadAudio]); // Depend on fragment parts, playSound, loadAudio
 
   const handlePlayPause = () => {
      if (isPlaying) {
@@ -374,8 +303,8 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
      }
   };
 
+  // Cleanup interval on unmount or when fragment changes
   useEffect(() => {
-    // Cleanup interval on unmount or when fragment changes
     return () => {
       stopPlayback();
     };
@@ -386,6 +315,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
      e.preventDefault();
      if (!newComment.trim()) return;
 
+     // TODO: Implement actual API call to submit comment
      const commentToAdd: Comment = {
         id: `comment-${Date.now()}`,
         author: "CurrentUser", // Replace with actual user later
@@ -408,19 +338,20 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
       <Card className="overflow-hidden shadow-md transition-shadow hover:shadow-lg">
         <CardHeader className="flex flex-row items-center space-x-3 p-4 bg-card">
           <Avatar>
+            {/* Use placeholder image with hint */}
             <AvatarImage src={fragment.authorAvatar || `https://picsum.photos/seed/${fragment.id}/40/40`} alt={fragment.author} data-ai-hint="avatar person" />
-            <AvatarFallback>{fragment.author.substring(0, 2).toUpperCase()}</AvatarFallback>
+            <AvatarFallback>{fragment.author?.substring(0, 2).toUpperCase() || '??'}</AvatarFallback>
           </Avatar>
           <div className="flex-1">
             <CardTitle className="text-sm font-medium">{fragment.title || 'Untitled Fragment'}</CardTitle>
             <p className="text-xs text-muted-foreground">
-               By {fragment.author}
+               By {fragment.author || 'Unknown Author'}
                {fragment.originalAuthor && (
                  <> • Remixed from <span className="font-medium text-primary">{fragment.originalAuthor}</span></>
                )}
             </p>
             <p className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(fragment.timestamp), { addSuffix: true })} {/* Ensure timestamp is Date */}
+              {fragment.timestamp ? formatDistanceToNow(new Date(fragment.timestamp), { addSuffix: true }) : 'Recently'}
                {fragment.bpm && ` • ${fragment.bpm} BPM`}
             </p>
           </div>
@@ -448,9 +379,10 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
 
         {/* Visual representation */}
         <CardContent className="p-0 aspect-square bg-secondary/30 flex items-center justify-center">
-           <div className="grid grid-cols-4 gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto">
-             {fragment.pads?.map(pad => { // Safe access to pads
-                const isPadActive = pad.isActive && pad.sounds?.length > 0; // Safe access to sounds
+           {/* Adjust grid visualization based on fragment.columns/rows if needed */}
+           <div className={`grid grid-cols-${fragment.columns || 4} gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto`}>
+             {fragment.pads?.map(pad => { // Iterate through processed pads
+                const isPadActive = pad.isActive && pad.sounds?.length > 0;
                  // Use the current sound's color if available, ensure it exists
                  const currentSound: PadSound | undefined = pad.sounds?.[pad.currentSoundIndex ?? 0]; // Safe access
                  const displayColor = isPadActive && currentSound?.color ? currentSound.color : undefined;
@@ -519,9 +451,10 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setShowComments(!showComments)} aria-expanded={showComments}>
                 <MessageCircle className="mr-2 h-4 w-4" />
-                {comments.length}
+                {fragment.commentsCount || comments.length} {/* Show API count or local count */}
               </Button>
             </div>
+            {/* Disable remix if it's already a remix? Or allow chain remixing? */}
             <Link href={`/remix/${fragment.id}`} passHref>
                <Button variant="outline" size="sm">
                   <GitFork className="mr-2 h-4 w-4" />
@@ -533,6 +466,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
            {/* Comment Section */}
            {showComments && (
              <div className="w-full space-y-4 pt-4 border-t">
+               {/* TODO: Fetch actual comments here */}
                <ScrollArea className="h-40 w-full pr-4">
                  <div className="space-y-3">
                    {comments.length > 0 ? comments.map((comment) => (
@@ -540,10 +474,10 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                        <span className="font-semibold">{comment.author}:</span>
                        <span className="flex-1">{comment.text}</span>
                         <span className="text-xs text-muted-foreground self-end">
-                          {formatDistanceToNow(new Date(comment.timestamp), { addSuffix: true })} {/* Ensure Date */}
+                           {comment.timestamp ? formatDistanceToNow(new Date(comment.timestamp), { addSuffix: true }) : ''}
                         </span>
                      </div>
-                   )) : <p className="text-sm text-muted-foreground">No comments yet.</p>}
+                   )) : <p className="text-sm text-muted-foreground">No comments yet. (Fetching...)</p>}
                  </div>
                </ScrollArea>
                <form onSubmit={handleCommentSubmit} className="flex space-x-2">

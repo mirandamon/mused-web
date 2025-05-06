@@ -1,6 +1,6 @@
 // functions/src/routes/sounds.js
 const express = require('express');
-const { db, storage } = require('../firebaseAdmin'); // Ensure db and storage are imported correctly
+const { db, storage, admin } = require('../firebaseAdmin'); // Ensure db, storage, and admin are imported correctly
 
 const router = express.Router();
 
@@ -9,20 +9,21 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 const URL_EXPIRATION_MS = 60 * 60 * 1000; // 1 hour
 
-// Helper function to get signed URL
+// Helper function to get signed URL (same as in fragments.js)
 async function getSignedUrl(filePath) {
-    if (!storage || !filePath) return null;
+    if (!storage || !filePath || !filePath.startsWith('gs://')) {
+        console.warn(`getSignedUrl: Invalid filePath provided: ${filePath}`);
+        return null;
+    }
 
     try {
         const bucket = storage.bucket(); // Use default bucket
-        // Ensure filePath doesn't start with a slash for gcs
-        const cleanPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-        const file = bucket.file(cleanPath);
+        const pathWithoutBucket = filePath.substring(filePath.indexOf('/', 5) + 1);
+        const file = bucket.file(pathWithoutBucket);
 
-        // Check if the file exists before trying to get a URL
         const [exists] = await file.exists();
         if (!exists) {
-            console.warn(`File not found in storage: ${cleanPath}`);
+            console.warn(`File not found in storage at path: ${pathWithoutBucket} (from ${filePath})`);
             return null;
         }
 
@@ -36,6 +37,7 @@ async function getSignedUrl(filePath) {
         return null; // Return null if there's an error
     }
 }
+
 
 router.get('/', async (req, res) => {
     let { limit, startAfter } = req.query;
@@ -53,7 +55,7 @@ router.get('/', async (req, res) => {
         }
 
         let query = db.collection(SOUNDS_COLLECTION)
-                      .orderBy('created_at', 'desc') // Example ordering, adjust as needed
+                      .orderBy('created_at', 'desc') // Order by creation time
                       .limit(limit);
 
         if (startAfter) {
@@ -79,7 +81,10 @@ router.get('/', async (req, res) => {
 
             const soundData = {
                 id: doc.id,
-                ...data,
+                name: data.name || 'Unnamed Sound',
+                owner_user_id: data.owner_user_id,
+                source_type: data.source_type,
+                source_url: data.source_url, // Original gs:// path
                 created_at: createdAtISO, // Use the potentially null ISO string
             };
 
