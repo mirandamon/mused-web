@@ -45,18 +45,19 @@ async function getSignedUrl(filePath) {
 
 // --- Input Validation Helper (for POST) ---
 const validateFragmentInput = (data) => {
-    // ... (validation code remains the same) ...
     const errors = [];
     if (!data || typeof data !== 'object') {
         errors.push("Invalid request body.");
         return errors;
     }
-    if (!Array.isArray(data.pads) || data.pads.length === 0) {
-        // Allow empty pads array on save, filter later.
-        // errors.push("Field 'pads' must be a non-empty array.");
+     // Expecting `pads` to contain ALL 16 pads now for saving state correctly
+    if (!Array.isArray(data.pads) || data.pads.length !== 16) { // Validate all 16 pads are present
+        errors.push("Field 'pads' must be an array containing exactly 16 pad objects.");
     } else {
-        // Basic validation for pads structure
         data.pads.forEach((pad, index) => {
+            if (pad.id !== index) { // Verify pad ID matches its index
+                 errors.push(`Pad at index ${index} has incorrect 'id' ${pad.id}.`);
+            }
             if (typeof pad.id !== 'number') errors.push(`Pad at index ${index} is missing a numeric 'id'.`);
             if (!Array.isArray(pad.sounds)) errors.push(`Pad ${pad.id} is missing a 'sounds' array.`);
             else {
@@ -70,6 +71,9 @@ const validateFragmentInput = (data) => {
                     }
                 });
             }
+             // Check for required state properties
+            if (typeof pad.isActive !== 'boolean') errors.push(`Pad ${pad.id} is missing boolean 'isActive' state.`);
+            if (typeof pad.currentSoundIndex !== 'number') errors.push(`Pad ${pad.id} is missing numeric 'currentSoundIndex'.`);
         });
     }
     if (typeof data.bpm !== 'number' || data.bpm <= 0) {
@@ -98,12 +102,10 @@ router.post('/', async (req, res) => {
         }
 
         // --- 2. Transform Pad Data ---
-        // Create the pad_sounds map: { "padIndex": ["soundId1", "soundId2", ...] }
-        // Only include pads that have sounds. Store only the sound ID.
+        // Create pad_sounds map { "padIndex": ["soundId1", ...] } - ONLY for pads with sounds
         const padSoundsMap = inputData.pads.reduce((acc, pad) => {
             if (pad.sounds && pad.sounds.length > 0) {
-                // Map sound objects to just their soundId
-                const soundIds = pad.sounds.map(sound => sound.soundId).filter(id => !!id); // Filter out any null/undefined ids
+                const soundIds = pad.sounds.map(sound => sound.soundId).filter(id => !!id);
                 if (soundIds.length > 0) {
                   acc[pad.id.toString()] = soundIds;
                 }
@@ -111,15 +113,12 @@ router.post('/', async (req, res) => {
             return acc;
         }, {});
 
-        // Store the UI state (isActive, currentSoundIndex) in a separate map
+        // Create pad_state map { "padIndex": {isActive, currentSoundIndex} } - FOR ALL PADS
         const padStateMap = inputData.pads.reduce((acc, pad) => {
-             // Only store state for pads that will be in padSoundsMap or if specifically needed
-             if (pad.sounds && pad.sounds.length > 0) {
-                 acc[pad.id.toString()] = {
-                    isActive: pad.isActive !== undefined ? pad.isActive : true, // Default to active if sounds exist
-                    currentSoundIndex: pad.currentSoundIndex !== undefined ? pad.currentSoundIndex : 0,
-                 };
-             }
+            acc[pad.id.toString()] = {
+               isActive: pad.isActive, // Directly use the value from input
+               currentSoundIndex: pad.currentSoundIndex ?? 0, // Default to 0 if undefined
+            };
              return acc;
         }, {});
 
@@ -141,8 +140,8 @@ router.post('/', async (req, res) => {
             likes: 0, // Initialize likes
             comments_count: 0, // Initialize comments count
             view_count: 0, // Initialize view count
-            pad_sounds: padSoundsMap, // The sound ID map
-            pad_state: padStateMap, // The UI state map
+            pad_sounds: padSoundsMap, // Map of sound IDs for pads *with* sounds
+            pad_state: padStateMap, // Map of state for *all* pads
             // Add other relevant fields from inputData if necessary
         };
 
@@ -256,18 +255,23 @@ router.get('/', async (req, res) => {
         // --- 4. Process Fragments and Build Response ---
         const fragments = fragmentSnapshot.docs.map(doc => {
             const data = doc.data();
+            const rows = data.rows || 4;
+            const columns = data.columns || 4;
+            const totalPads = rows * columns;
 
-            // Reconstruct pads array from pad_sounds and pad_state
-            const pads = Array.from({ length: data.rows * data.columns || 16 }, (_, i) => {
+            // Reconstruct the full pads array (0 to totalPads - 1)
+            const pads = Array.from({ length: totalPads }, (_, i) => {
                 const padIndexStr = i.toString();
                 const soundIdsForPad = data.pad_sounds?.[padIndexStr] || [];
-                const stateForPad = data.pad_state?.[padIndexStr] || { isActive: false, currentSoundIndex: 0 }; // Default state
+                // Get state from pad_state map, provide default if missing
+                const stateForPad = data.pad_state?.[padIndexStr] || { isActive: false, currentSoundIndex: 0 };
 
+                // Resolve sound details for this pad
                 const padSounds = soundIdsForPad
                     .map(soundId => {
                         const soundInfo = soundDataMap.get(soundId);
                         if (!soundInfo) {
-                            console.warn(`Fragment ${doc.id}: Sound info for ID ${soundId} not found.`);
+                            console.warn(`Fragment ${doc.id}, Pad ${i}: Sound info for ID ${soundId} not found.`);
                             return null; // Skip if sound data couldn't be fetched
                         }
                         return {
@@ -282,10 +286,11 @@ router.get('/', async (req, res) => {
                     .filter(ps => ps !== null); // Filter out sounds that couldn't be resolved
 
                 return {
-                    id: i,
+                    id: i, // The index of the pad (0 to totalPads-1)
                     sounds: padSounds,
-                    isActive: stateForPad.isActive && padSounds.length > 0, // Ensure isActive reflects sound availability
-                    currentSoundIndex: stateForPad.currentSoundIndex ?? 0,
+                    // Use isActive from pad_state, but ensure it's false if no sounds exist
+                    isActive: (stateForPad.isActive === true) && (padSounds.length > 0),
+                    currentSoundIndex: stateForPad.currentSoundIndex ?? 0, // Use index from pad_state
                 };
             });
 
@@ -301,7 +306,7 @@ router.get('/', async (req, res) => {
                 authorAvatar: null, // Fetch/resolve avatar URL on client if needed
                 authorId: data.author_id, // Include author ID
                 timestamp: createdAtISO, // Use created_at for timestamp
-                pads: pads,
+                pads: pads, // The fully reconstructed pads array
                 likes: data.likes || 0,
                 comments: [], // Comments need separate fetching/subcollection query on client or API
                 commentsCount: data.comments_count || 0,
@@ -310,8 +315,8 @@ router.get('/', async (req, res) => {
                 originalAuthor: data.original_author_id ? 'FetchAuthorNameLater' : null, // Resolve name later if needed
                 originalAuthorId: data.original_author_id || null,
                 originalFragmentId: data.original_fragment_id || null,
-                columns: data.columns || 4,
-                rows: data.rows || 4,
+                columns: columns,
+                rows: rows,
                 viewCount: data.view_count || 0,
             };
         });
