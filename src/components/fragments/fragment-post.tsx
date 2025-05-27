@@ -249,8 +249,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
           const playBeatSounds = (beatIndex: number) => { // beatIndex is the pad.id (0-15)
               const padToPlay = fragment.pads.find(p => p.id === beatIndex); // Find pad by its ID
 
-              // For feed playback, play if the pad has sounds, regardless of its saved `isActive` (editor toggle)
-              // The saved `isActive` is more for sequencer logic in editor/remix.
+              // For feed playback, play if the pad has sounds
               if (padToPlay && padToPlay.sounds && padToPlay.sounds.length > 0) {
                   console.log(`Post ${fragment.id}: Playing Beat/Pad ID ${beatIndex}, Sounds: ${padToPlay.sounds.length}`);
                   padToPlay.sounds.forEach(soundToPlay => {
@@ -259,13 +258,11 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                           const buffer = globalAudioBuffers[urlToUse];
                           if (buffer) {
                               playSound(buffer);
-                              // console.log(`Post ${fragment.id}: Playing cached sound ${soundToPlay.soundName} from ${urlToUse}`);
                           } else {
                               console.warn(`Post ${fragment.id}: Playback - Buffer for ${soundToPlay.soundName} (${urlToUse}) not found, attempting load...`);
                               loadAudio(urlToUse).then(loadedBuffer => {
                                   if (loadedBuffer) {
                                     playSound(loadedBuffer);
-                                    // console.log(`Post ${fragment.id}: Loaded and played sound ${soundToPlay.soundName} on demand.`);
                                   } else {
                                      console.error(`Post ${fragment.id}: Playback - Buffer for ${soundToPlay.soundName} (${urlToUse}) could not be loaded on demand.`);
                                   }
@@ -276,7 +273,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                       }
                   });
               } else {
-                  // console.log(`Post ${fragment.id}: Skipping Beat/Pad ID ${beatIndex} - Pad ${padToPlay?.id} has no sounds or was not found.`);
+                   // console.log(`Post ${fragment.id}: Skipping Beat/Pad ID ${beatIndex} - Pad ${padToPlay?.id} has no sounds or was not found.`);
               }
           };
 
@@ -285,7 +282,6 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
           playbackIntervalRef.current = setInterval(() => {
             setCurrentBeat(prevBeat => {
               const nextBeatRaw = (prevBeat !== null ? prevBeat + 1 : 0);
-              // Total pads in a 4x4 grid is 16 (0-15)
               const totalPadsInGrid = (fragment.rows || 4) * (fragment.columns || 4);
               const nextBeatId = nextBeatRaw % totalPadsInGrid;
 
@@ -384,23 +380,20 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
            {/* Ensure fragment.pads is available before mapping */}
            <div className={`grid grid-cols-${fragment.columns || 4} gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto`}>
              {(fragment.pads && fragment.pads.length > 0 ? fragment.pads : Array.from({ length: (fragment.rows || 4) * (fragment.columns || 4) }, (_, i) => ({ id: i, sounds: [], isActive: initialFragment?.pads?.find(p=>p.id===i)?.isActive || false, currentSoundIndex: 0 }))).map(pad => {
-                // For feed display, a pad is visually "active" if it has sounds.
-                // The editor's `isActive` toggle is respected by the API for what's in `pad_sounds`,
-                // but for playback on feed, if sounds are present, we want to show them.
                 const hasSounds = pad.sounds && pad.sounds.length > 0;
                 const currentSoundIndex = pad.currentSoundIndex ?? 0;
                 const currentSound: PadSound | undefined = hasSounds ? pad.sounds?.[currentSoundIndex] : undefined;
-                const displayColor = currentSound?.color; // Color from client-side processing
+                const displayColor = currentSound?.color;
 
                 const bgColorClass = displayColor
-                  ? displayColor // Use the sound's assigned color
+                  ? displayColor
                   : hasSounds
-                    ? 'bg-gradient-to-br from-primary/30 to-secondary/30' // Pad has sounds, but no specific color (e.g., if first sound has no color yet)
-                    : 'bg-muted/40'; // Pad has no sounds
+                    ? 'bg-gradient-to-br from-primary/30 to-secondary/30'
+                    : 'bg-muted/40';
 
-                // A pad is highlighted if it's the current beat AND it has sounds to play.
+                // A pad is highlighted if it's the current beat, regardless of having sounds.
                 const isCurrentPlayingBeat = isPlaying && currentBeat === pad.id;
-                const shouldHighlight = hasSounds && isCurrentPlayingBeat;
+                const shouldHighlight = isCurrentPlayingBeat; // Simplified highlight condition
 
                return (
                  <Tooltip key={pad.id} delayDuration={200}>
@@ -410,7 +403,8 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                             "relative w-full h-full rounded transition-all duration-100 border border-transparent",
                             bgColorClass,
                             shouldHighlight ? 'ring-2 ring-offset-1 ring-accent scale-[1.08] shadow-md border-accent/50' : '',
-                            hasSounds && !shouldHighlight ? 'border-foreground/10' : 'border-background/10', // Subtle border if has sounds but not current beat
+                            // Subtle border if has sounds but not current beat, OR if no sounds and not current beat
+                            (hasSounds && !shouldHighlight) || (!hasSounds && !shouldHighlight) ? 'border-background/10' : '',
                             hasSounds && pad.sounds && pad.sounds.length > 1 && "flex items-center justify-center" // For multi-sound icon
                             )}
                         >
@@ -499,3 +493,4 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
     </TooltipProvider>
   );
 }
+
