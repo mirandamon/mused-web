@@ -14,7 +14,7 @@ const firebaseConfig = {
 // Initialize Firebase
 if (!getApps().length) {
   // Prevents initializing Firebase multiple times
-  const app = initializeApp(firebaseConfig);
+  initializeApp(firebaseConfig);
 }
-const app = getApp();
-export { app };
+
+export const app = getApp();
