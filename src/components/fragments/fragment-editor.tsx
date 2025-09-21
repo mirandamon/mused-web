@@ -149,7 +149,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
   const [bpm, setBpm] = useState<number>(120);
-  const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const playbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // --- Web Audio API State ---
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -866,14 +866,53 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   // --- Playback Logic ---
 
-  const stopPlayback = useCallback(() => {
-    if (playbackIntervalRef.current) {
-      clearInterval(playbackIntervalRef.current);
-      playbackIntervalRef.current = null;
+  const clearPlaybackTimer = useCallback(() => {
+    if (playbackTimerRef.current) {
+      clearInterval(playbackTimerRef.current);
+      playbackTimerRef.current = null;
     }
+  }, []);
+
+  const playPadSounds = useCallback((padIndex: number) => {
+    const padToPlay = pads.find(pad => pad.id === padIndex);
+    if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
+      padToPlay.sounds.forEach(soundToPlay => {
+        const urlToUse = soundToPlay?.downloadUrl; // Use resolved URL
+        if (urlToUse && urlToUse.startsWith('http')) {
+          const cacheKey = urlToUse; // Use resolved URL as cache key
+          const buffer = audioBuffersRef.current[cacheKey];
+          if (buffer) {
+            playSound(buffer);
+          } else {
+            console.warn(`Playback: Buffer for ${urlToUse} not found, attempting load...`);
+            loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
+              if (loadedBuffer) playSound(loadedBuffer);
+              else console.error(`Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
+            });
+          }
+        } else {
+          console.warn(`Beat: ${padIndex}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No valid download URL. Original: ${soundToPlay?.soundUrl}`);
+        }
+      });
+    }
+  }, [pads, playSound, loadAudio]);
+
+  const schedulePlaybackInterval = useCallback((beatDuration: number) => {
+    clearPlaybackTimer();
+    playbackTimerRef.current = setInterval(() => {
+      setCurrentBeat(prevBeat => {
+        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop through 0-15
+        playPadSounds(nextBeat); // Play sounds for the next beat's pad
+        return nextBeat; // Update the current beat for the next interval
+      });
+    }, beatDuration);
+  }, [clearPlaybackTimer, playPadSounds]);
+
+  const stopPlayback = useCallback(() => {
+    clearPlaybackTimer();
     setIsPlaying(false);
     setCurrentBeat(null);
-  }, []);
+  }, [clearPlaybackTimer]);
 
   const startPlayback = useCallback(() => {
      if (!audioContextRef.current) {
@@ -885,54 +924,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
            audioContextRef.current.resume();
       }
 
-    if (playbackIntervalRef.current) {
-      clearInterval(playbackIntervalRef.current);
-    }
     setIsPlaying(true);
     setCurrentBeat(0); // Start from the first beat
+    playPadSounds(0);
 
       const beatDuration = (60 / bpm) * 1000; // Calculate duration based on BPM
-
-      // Helper function to play all sounds for a given pad index
-      const playPadSounds = (padIndex: number) => {
-        const padToPlay = pads.find(pad => pad.id === padIndex);
-        if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
-          // Play ALL sounds assigned to this pad
-          padToPlay.sounds.forEach(soundToPlay => {
-            const urlToUse = soundToPlay?.downloadUrl; // Use resolved URL
-            if (urlToUse && urlToUse.startsWith('http')) {
-              const cacheKey = urlToUse; // Use resolved URL as cache key
-              const buffer = audioBuffersRef.current[cacheKey];
-              if (buffer) {
-                playSound(buffer);
-              } else {
-                console.warn(`Playback: Buffer for ${urlToUse} not found, attempting load...`);
-                loadAudio(soundToPlay.soundUrl || urlToUse, urlToUse).then(loadedBuffer => {
-                  if (loadedBuffer) playSound(loadedBuffer);
-                  else console.error(`Playback: Buffer for ${urlToUse} could not be loaded on demand.`);
-                });
-              }
-            } else {
-              console.warn(`Beat: ${padIndex}, Pad ${padToPlay.id}, Sound: ${soundToPlay?.soundName} - No valid download URL. Original: ${soundToPlay?.soundUrl}`);
-            }
-          });
-        } else {
-           // console.log(`Not playing beat: ${padIndex}`);
-        }
-      };
-
-      // Play the first beat immediately
-      playPadSounds(0);
-
-      // Start the interval for subsequent beats
-      playbackIntervalRef.current = setInterval(() => {
-        setCurrentBeat(prevBeat => {
-          const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop through 0-15
-          playPadSounds(nextBeat); // Play sounds for the next beat's pad
-          return nextBeat; // Update the current beat for the next interval
-        });
-      }, beatDuration);
-  }, [bpm, pads, playSound, loadAudio]);
+      schedulePlaybackInterval(beatDuration);
+  }, [bpm, playPadSounds, schedulePlaybackInterval]);
 
 
   const handlePlayPause = () => {
@@ -946,14 +944,20 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   };
 
 
-  // Effect to restart or stop playback if bpm or pads change while playing
+  // Effect to restart playback timing when tempo-affecting values change
   useEffect(() => {
-    if (isPlaying) {
-      startPlayback(); // Restart playback with new settings
+    if (!isPlaying) {
+      clearPlaybackTimer();
+      return;
     }
-    // Cleanup function to stop playback when component unmounts or dependencies change
-    return () => stopPlayback();
-  }, [isPlaying, bpm, pads, startPlayback, stopPlayback]); // Re-run if isPlaying, bpm, or pads change
+
+    const beatDuration = (60 / bpm) * 1000;
+    schedulePlaybackInterval(beatDuration);
+
+    return () => {
+      clearPlaybackTimer();
+    };
+  }, [isPlaying, bpm, schedulePlaybackInterval, clearPlaybackTimer]);
 
    const handleSheetOpenChange = (open: boolean) => {
      setIsSoundSheetOpen(open);
