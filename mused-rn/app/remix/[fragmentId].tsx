@@ -29,6 +29,7 @@ export default function RemixFragmentScreen() {
   const [initialBpm, setInitialBpm] = useState<number>(120);
   const [initialTitle, setInitialTitle] = useState<string>('');
   const [originalAuthor, setOriginalAuthor] = useState<string | null>(null);
+  const [originalAuthorId, setOriginalAuthorId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -105,6 +106,13 @@ export default function RemixFragmentScreen() {
         setInitialBpm(typeof data.bpm === 'number' ? data.bpm : 120);
         setInitialTitle(data.title ? `Remix of ${data.title}` : 'Remix');
         setOriginalAuthor(data.originalAuthor ?? data.author ?? null);
+        setOriginalAuthorId(
+          typeof data.originalAuthorId === 'string'
+            ? data.originalAuthorId
+            : typeof (data as any)?.original_author_id === 'string'
+            ? ((data as any).original_author_id as string)
+            : null,
+        );
         setLoadError(null);
       } catch (error) {
         if (!isMounted) {
@@ -174,6 +182,7 @@ export default function RemixFragmentScreen() {
             initialTitle={initialTitle}
             originalFragmentId={typeof fragmentId === 'string' ? fragmentId : null}
             originalAuthorName={originalAuthor}
+            originalAuthorId={originalAuthorId}
             onPostStart={handlePostStart}
             onPostSuccess={handlePostSuccess}
             onPostError={handlePostError}

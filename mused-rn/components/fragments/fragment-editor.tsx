@@ -17,6 +17,7 @@ export interface FragmentEditorProps {
   initialTitle?: string;
   originalFragmentId?: string | null;
   originalAuthorName?: string | null;
+  originalAuthorId?: string | null;
   onPostStart?: () => void;
   onPostSuccess?: (result: unknown) => void;
   onPostError?: (error: Error) => void;
@@ -42,6 +43,7 @@ const FragmentEditor: React.FC<FragmentEditorProps> = ({
   initialTitle = '',
   originalFragmentId = null,
   originalAuthorName = null,
+  originalAuthorId = null,
   onPostStart,
   onPostSuccess,
   onPostError,
@@ -103,24 +105,41 @@ const FragmentEditor: React.FC<FragmentEditorProps> = ({
     setIsPosting(true);
     setStatusMessage('Posting fragment...');
 
-    const padsPayload = pads
-      .filter((pad) => pad.sounds && pad.sounds.length > 0)
-      .map((pad) => ({
-        id: pad.id,
-        isActive: pad.isActive,
-        currentSoundIndex: pad.currentSoundIndex ?? 0,
-        sounds: pad.sounds.map((sound) => ({
-          soundId: sound.soundId,
-          soundName: sound.soundName,
-          soundUrl: sound.soundUrl,
-        })),
-      }));
+    const padsPayload = pads.map((pad, index) => ({
+      id: typeof pad.id === 'number' ? pad.id : index,
+      isActive: typeof pad.isActive === 'boolean' ? pad.isActive : pad.sounds.length > 0,
+      currentSoundIndex: typeof pad.currentSoundIndex === 'number' ? pad.currentSoundIndex : 0,
+      sounds: pad.sounds.map((sound, soundIndex) => ({
+        soundId: sound.soundId ?? `${index}-${soundIndex}`,
+        soundName: sound.soundName ?? 'Untitled sound',
+        soundUrl: sound.soundUrl,
+        downloadUrl: sound.downloadUrl,
+        source: sound.source,
+      })),
+    }));
+
+    const hasInvalidSoundSources = padsPayload.some((pad) =>
+      pad.sounds.some(
+        (sound) => typeof sound.soundUrl !== 'string' || !sound.soundUrl.startsWith('gs://'),
+      ),
+    );
+
+    if (hasInvalidSoundSources) {
+      const error = new Error(
+        'Some sounds are missing their storage references. Please reload the fragment and try again.',
+      );
+      setStatusMessage(error.message);
+      Alert.alert('Fragment incomplete', error.message);
+      onPostError?.(error);
+      return;
+    }
 
     const body = {
       pads: padsPayload,
       bpm,
       title: title?.trim() || 'Untitled Fragment',
       originalFragmentId: originalFragmentId ?? null,
+      originalAuthorId: originalAuthorId ?? null,
       columns: GRID_COLUMNS,
       rows: GRID_COLUMNS,
     };
@@ -166,6 +185,7 @@ const FragmentEditor: React.FC<FragmentEditorProps> = ({
     onPostStart,
     onPostSuccess,
     originalAuthorName,
+    originalAuthorId,
     originalFragmentId,
     pads,
     title,
