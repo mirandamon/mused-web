@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import { MiniPadGrid } from '@/components/feed/mini-pad-grid';
+import { FragmentPlayback } from '@/components/feed/fragment-playback';
 import type { Fragment } from '@/lib/types';
 
 interface FragmentCardProps {
@@ -35,7 +35,7 @@ export function FragmentCard({ fragment }: FragmentCardProps) {
       </View>
 
       <View style={styles.gridContainer}>
-        <MiniPadGrid pads={fragment.pads} />
+        <FragmentPlayback fragment={fragment} />
       </View>
 
       <View style={styles.footer}>
@@ -79,8 +79,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   gridContainer: {
-    borderRadius: 20,
-    overflow: 'hidden',
+    marginVertical: 20,
   },
   footer: {
     flexDirection: 'row',
