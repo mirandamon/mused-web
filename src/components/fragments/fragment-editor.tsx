@@ -1,10 +1,10 @@
 // src/components/fragments/fragment-editor.tsx
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Music2, Mic, Upload, Check, Play, Pause, Layers, Volume2, VolumeX, Plus, Minus } from 'lucide-react'; // Added Volume, Plus, Minus icons
+import { Music2, Mic, Upload, Check, Play, Pause, Layers, Volume2, VolumeX, Plus, Minus, ChevronLeft, ChevronRight } from 'lucide-react'; // Added UI icons
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import SoundSelectionSheetWrapper from './sound-selection-sheet'; // Updated import
@@ -70,6 +70,10 @@ const defaultPads: Pad[] = Array.from({ length: 16 }, (_, i) => ({
   currentSoundIndex: 0, // Initialize index
 }));
 
+const PADS_PER_PAGE = 16;
+
+type PlaceholderPad = { placeholder: true; id: string };
+
 // --- Client-side Color Management ---
 // Check if running in a browser environment before accessing window
 const isBrowser = typeof window !== 'undefined';
@@ -134,6 +138,7 @@ export const getOrAssignSoundColor = (soundId: string): string => {
 
 export default function FragmentEditor({ initialPads: rawInitialPads, originalAuthor, originalFragmentId }: FragmentEditorProps) {
   const [pads, setPads] = useState<Pad[]>(defaultPads);
+  const [currentPadPage, setCurrentPadPage] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [selectedPadId, setSelectedPadId] = useState<number | null>(null);
   const [currentSelectedPadData, setCurrentSelectedPadData] = useState<Pad | null>(null);
@@ -160,6 +165,58 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   const LONG_PRESS_DURATION = 500; // milliseconds
   const SWIPE_THRESHOLD = 30; // Reduced threshold for better sensitivity
+
+  const totalPadPages = Math.max(1, Math.ceil(pads.length / PADS_PER_PAGE));
+  const currentPageStartIndex = currentPadPage * PADS_PER_PAGE;
+
+  const displayedPads = useMemo<(Pad | PlaceholderPad)[]>(() => {
+    const slice = pads.slice(currentPageStartIndex, currentPageStartIndex + PADS_PER_PAGE);
+    if (slice.length === PADS_PER_PAGE) {
+      return slice;
+    }
+
+    return [
+      ...slice,
+      ...Array.from({ length: PADS_PER_PAGE - slice.length }, (_, idx) => {
+        const placeholderIndex = currentPageStartIndex + slice.length + idx;
+        return { placeholder: true, id: `placeholder-${placeholderIndex}` } as PlaceholderPad;
+      }),
+    ];
+  }, [pads, currentPageStartIndex]);
+
+  useEffect(() => {
+    setCurrentPadPage((prev) => {
+      const maxPageIndex = Math.max(0, totalPadPages - 1);
+      return prev > maxPageIndex ? maxPageIndex : prev;
+    });
+  }, [totalPadPages]);
+
+  useEffect(() => {
+    if (!isPlaying || currentBeat === null) {
+      return;
+    }
+
+    const beatPage = Math.floor(currentBeat / PADS_PER_PAGE);
+
+    if (beatPage < 0 || beatPage >= totalPadPages) {
+      return;
+    }
+
+    setCurrentPadPage((prev) => (prev === beatPage ? prev : beatPage));
+  }, [currentBeat, isPlaying, totalPadPages]);
+
+  const goToPreviousPadPage = () => {
+    setCurrentPadPage((prev) => Math.max(0, prev - 1));
+  };
+
+  const goToNextPadPage = () => {
+    setCurrentPadPage((prev) => Math.min(totalPadPages - 1, prev + 1));
+  };
+
+  const pageRangeStart = pads.length ? currentPageStartIndex + 1 : 0;
+  const pageRangeEnd = pads.length
+    ? Math.min(currentPageStartIndex + PADS_PER_PAGE, pads.length)
+    : 0;
 
    // Initialize Audio Context safely on the client
    useEffect(() => {
@@ -874,7 +931,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
   }, []);
 
   const playPadSounds = useCallback((padIndex: number) => {
-    const padToPlay = pads.find(pad => pad.id === padIndex);
+    const padToPlay = pads.find(pad => pad.id === padIndex) ?? pads[padIndex];
     if (padToPlay?.isActive && padToPlay.sounds.length > 0) {
       padToPlay.sounds.forEach(soundToPlay => {
         const urlToUse = soundToPlay?.downloadUrl; // Use resolved URL
@@ -901,12 +958,13 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
     clearPlaybackTimer();
     playbackTimerRef.current = setInterval(() => {
       setCurrentBeat(prevBeat => {
-        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % 16; // Loop through 0-15
+        const totalBeats = Math.max(pads.length, 1);
+        const nextBeat = (prevBeat !== null ? prevBeat + 1 : 0) % totalBeats; // Loop through available pads
         playPadSounds(nextBeat); // Play sounds for the next beat's pad
         return nextBeat; // Update the current beat for the next interval
       });
     }, beatDuration);
-  }, [clearPlaybackTimer, playPadSounds]);
+  }, [clearPlaybackTimer, pads.length, playPadSounds]);
 
   const stopPlayback = useCallback(() => {
     clearPlaybackTimer();
@@ -994,10 +1052,53 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
 
   return (
     <TooltipProvider>
-      <Card className="w-full max-w-md shadow-lg rounded-xl overflow-hidden">
-        <CardContent className="p-4 md:p-6">
-          <div className="grid grid-cols-4 gap-2 md:gap-3 aspect-square mb-6">
-            {pads.map((pad) => {
+      <Card className="w-full max-w-4xl mx-auto shadow-lg rounded-xl overflow-hidden">
+        <CardContent className="p-6 md:p-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-sm text-muted-foreground">
+              {pads.length
+                ? `Pads ${pageRangeStart}-${pageRangeEnd} of ${pads.length}`
+                : 'No pads available'}
+            </div>
+            {totalPadPages > 1 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={goToPreviousPadPage}
+                  disabled={currentPadPage === 0}
+                  aria-label="Show previous pads"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-xs font-medium tabular-nums">
+                  {currentPadPage + 1} / {totalPadPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={goToNextPadPage}
+                  disabled={currentPadPage >= totalPadPages - 1}
+                  aria-label="Show next pads"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-4 grid-rows-4 gap-2 sm:gap-3 aspect-square w-full mb-6">
+            {displayedPads.map((padLike, index) => {
+              if ('placeholder' in padLike) {
+                return (
+                  <div
+                    key={padLike.id}
+                    className="rounded-lg border-2 border-dashed border-muted-foreground/30 bg-secondary/40"
+                    aria-hidden="true"
+                  />
+                );
+              }
+
+              const pad = padLike;
               const hasSounds = pad.sounds.length > 0;
               // Use isActive toggle state for visual dimming, but color comes from sound
               const isPadUIToggledActive = pad.isActive;
@@ -1013,7 +1114,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
               // This now checks if the pad is being played during playback, regardless of whether it has any sound assigned to it.
               const isCurrentBeat = isPlaying && currentBeat === pad.id;
               // const isPadUIToggledActive = pad.isActive;
-              const row = Math.floor(pad.id / 4);
+              const row = Math.floor(index / 4);
               const delay = `${row * 100}ms`; // Stagger animation
 
               // Determine content based on pad state
@@ -1273,7 +1374,7 @@ export default function FragmentEditor({ initialPads: rawInitialPads, originalAu
             </div>
           </div>
         </CardContent>
-        <CardFooter className="flex justify-end p-4 border-t mt-4">
+        <CardFooter className="flex justify-end px-6 py-4 md:px-8 border-t mt-4">
           <Button onClick={handlePostFragment} disabled={isPlaying || isPosting}>
              {isPosting ? (
                  <div className="flex items-center">
