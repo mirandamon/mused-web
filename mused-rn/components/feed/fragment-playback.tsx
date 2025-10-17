@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Audio } from 'expo-av';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Audio, InterruptionModeAndroid } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { getDownloadURL, ref } from 'firebase/storage';
 
@@ -19,6 +19,8 @@ type UrlCache = Map<string, string>;
 
 type UrlPromiseCache = Map<string, Promise<string | null>>;
 
+type GridPad = Pad & { gridIndex: number };
+
 let audioModeConfigured = false;
 
 async function ensureAudioModeConfigured() {
@@ -31,7 +33,7 @@ async function ensureAudioModeConfigured() {
       allowsRecordingIOS: false,
       staysActiveInBackground: false,
       playsInSilentModeIOS: true,
-      interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
       shouldDuckAndroid: true,
     });
     audioModeConfigured = true;
@@ -52,7 +54,7 @@ function createPlaceholderPad(id: number): Pad {
 export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
-  const [currentBeat, setCurrentBeat] = useState<number | null>(null);
+  const [currentBeatIndex, setCurrentBeatIndex] = useState<number | null>(null);
 
   const assignColor = useSoundColors();
 
@@ -66,28 +68,35 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
 
   const rows = fragment.rows && fragment.rows > 0 ? fragment.rows : 4;
   const columns = fragment.columns && fragment.columns > 0 ? fragment.columns : 4;
-  const totalCells = rows * columns;
+  const totalCells = Math.max(1, rows * columns);
 
-  const padsById = useMemo(() => {
-    const map = new Map<number, Pad>();
-    (fragment.pads ?? []).forEach((pad) => {
-      map.set(pad.id, pad);
+  const sortedPads = useMemo<GridPad[]>(() => {
+    const pads = fragment.pads ?? [];
+    const limited = pads.slice(0, totalCells);
+    const padded: GridPad[] = Array.from({ length: totalCells }, (_, index) => ({
+      ...createPlaceholderPad(index),
+      gridIndex: index,
+    }));
+
+    limited.forEach((pad, index) => {
+      padded[index] = {
+        ...pad,
+        sounds: pad.sounds ?? [],
+        isActive: pad.isActive ?? (pad.sounds?.length ?? 0) > 0,
+        currentSoundIndex: pad.currentSoundIndex ?? 0,
+        gridIndex: index,
+      };
     });
-    return map;
-  }, [fragment.pads]);
 
-  const gridPads = useMemo(() => {
-    return Array.from({ length: totalCells }, (_, index) => padsById.get(index) ?? createPlaceholderPad(index));
-  }, [padsById, totalCells]);
-
-  const sortedPads = gridPads; // Already ordered by index
+    return padded;
+  }, [fragment.pads, totalCells]);
 
   const getDisplayColor = useCallback(
     (pad: Pad) => {
       const currentIndex = pad.currentSoundIndex ?? 0;
       const sound = pad.sounds?.[currentIndex] ?? pad.sounds?.[0];
       if (!sound) {
-        return '#111827';
+        return '#1f2937';
       }
 
       const normalized = normalizePadColor(sound.color);
@@ -112,9 +121,19 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
     beatIndexRef.current = 0;
     if (isMountedRef.current) {
       setIsPlaying(false);
-      setCurrentBeat(null);
+      setCurrentBeatIndex(null);
       setIsPreparing(false);
     }
+    soundCacheRef.current.forEach((sound) => {
+      void sound.getStatusAsync().then((status) => {
+        if (!status.isLoaded) {
+          return;
+        }
+        return sound.stopAsync().catch((error) => {
+          console.warn('Failed to stop sound', error);
+        });
+      });
+    });
   }, [clearIntervalRef]);
 
   const unloadSounds = useCallback(async () => {
@@ -181,38 +200,62 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
     []
   );
 
-  const loadSound = useCallback(async (url: string): Promise<Audio.Sound | null> => {
-    if (!url) {
-      return null;
-    }
+  const loadSoundFromSource = useCallback(
+    async (
+      cacheKey: string,
+      source: Parameters<typeof Audio.Sound.createAsync>[0]
+    ): Promise<Audio.Sound | null> => {
+      if (soundCacheRef.current.has(cacheKey)) {
+        return soundCacheRef.current.get(cacheKey)!;
+      }
 
-    if (soundCacheRef.current.has(url)) {
-      return soundCacheRef.current.get(url)!;
-    }
+      if (soundPromiseRef.current.has(cacheKey)) {
+        return soundPromiseRef.current.get(cacheKey)!;
+      }
 
-    if (soundPromiseRef.current.has(url)) {
-      return soundPromiseRef.current.get(url)!;
-    }
+      const promise = (async () => {
+        try {
+          const { sound } = await Audio.Sound.createAsync(source, { shouldPlay: false, volume: 1 });
+          soundCacheRef.current.set(cacheKey, sound);
+          return sound;
+        } catch (error) {
+          console.warn('Failed to load sound', error);
+          return null;
+        }
+      })();
 
-    const promise = (async () => {
-      try {
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: false, volume: 1 });
-        soundCacheRef.current.set(url, sound);
-        return sound;
-      } catch (error) {
-        console.warn(`Failed to load sound at ${url}`, error);
+      soundPromiseRef.current.set(cacheKey, promise);
+      const loadedSound = await promise;
+      soundPromiseRef.current.delete(cacheKey);
+      if (!loadedSound) {
+        soundCacheRef.current.delete(cacheKey);
+      }
+      return loadedSound;
+    },
+    []
+  );
+
+  const loadSoundForPadSound = useCallback(
+    async (padSound: PadSound): Promise<Audio.Sound | null> => {
+      if (padSound.asset) {
+        const cacheKey = `asset:${padSound.asset}`;
+        return loadSoundFromSource(cacheKey, padSound.asset);
+      }
+
+      if (padSound.localUri) {
+        const cacheKey = `file:${padSound.localUri}`;
+        return loadSoundFromSource(cacheKey, { uri: padSound.localUri });
+      }
+
+      const url = await getPlayableUrl(padSound);
+      if (!url) {
         return null;
       }
-    })();
 
-    soundPromiseRef.current.set(url, promise);
-    const loadedSound = await promise;
-    soundPromiseRef.current.delete(url);
-    if (!loadedSound) {
-      soundCacheRef.current.delete(url);
-    }
-    return loadedSound;
-  }, []);
+      return loadSoundFromSource(url, { uri: url });
+    },
+    [getPlayableUrl, loadSoundFromSource]
+  );
 
   const playPadSounds = useCallback(
     async (pad: Pad) => {
@@ -221,11 +264,7 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
       }
 
       const playPromises = pad.sounds.map(async (padSound) => {
-        const url = await getPlayableUrl(padSound);
-        if (!url) {
-          return;
-        }
-        const sound = await loadSound(url);
+        const sound = await loadSoundForPadSound(padSound);
         if (!sound) {
           return;
         }
@@ -237,8 +276,7 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
           if (status.isPlaying) {
             await sound.stopAsync();
           }
-          await sound.setPositionAsync(0);
-          await sound.playAsync();
+          await sound.playFromPositionAsync(0);
         } catch (error) {
           console.warn('Failed to play sound', error);
         }
@@ -246,7 +284,7 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
 
       await Promise.all(playPromises);
     },
-    [getPlayableUrl, loadSound]
+    [loadSoundForPadSound]
   );
 
   const startPlayback = useCallback(async () => {
@@ -259,11 +297,13 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
       await ensureAudioModeConfigured();
 
       if (isMountedRef.current) {
-        setCurrentBeat(sortedPads[0].id);
+        setCurrentBeatIndex(0);
       }
 
-      // Preload first pad sounds before starting playback to avoid silence
-      await playPadSounds(sortedPads[0]);
+      const firstPad = sortedPads[0];
+      if (firstPad) {
+        await playPadSounds(firstPad);
+      }
 
       if (!isMountedRef.current) {
         return;
@@ -282,7 +322,7 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
           return;
         }
         if (isMountedRef.current) {
-          setCurrentBeat(nextPad.id);
+          setCurrentBeatIndex(nextPad.gridIndex);
         }
         void playPadSounds(nextPad);
       }, intervalMs);
@@ -316,19 +356,15 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
 
   useEffect(() => {
     stopPlayback();
-  }, [fragment.id, fragment.pads, stopPlayback]);
+  }, [fragment.columns, fragment.id, fragment.pads, fragment.rows, stopPlayback]);
 
   useEffect(() => {
     sortedPads.forEach((pad) => {
       pad.sounds?.forEach((padSound) => {
-        void getPlayableUrl(padSound).then((url) => {
-          if (url) {
-            void loadSound(url);
-          }
-        });
+        void loadSoundForPadSound(padSound);
       });
     });
-  }, [getPlayableUrl, loadSound, sortedPads]);
+  }, [loadSoundForPadSound, sortedPads]);
 
   const cellWidth = `${100 / columns}%`;
 
@@ -352,21 +388,20 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
             <Ionicons name={isPlaying ? 'pause' : 'play'} size={16} color="#f8fafc" />
           )}
         </Pressable>
-        <Text style={styles.bpmLabel}>{fragment.bpm ? `${fragment.bpm} BPM` : 'Play'}</Text>
       </View>
       <View style={[styles.grid, { aspectRatio: columns / rows }]}>
         {sortedPads.map((pad) => {
           const color = getDisplayColor(pad);
-          const isActiveBeat = isPlaying && currentBeat === pad.id;
+          const isActiveBeat = isPlaying && currentBeatIndex === pad.gridIndex;
           const hasMultipleSounds = (pad.sounds?.length ?? 0) > 1;
           const hasSounds = (pad.sounds?.length ?? 0) > 0;
 
           return (
             <View
-              key={pad.id}
+              key={pad.gridIndex}
               style={[
                 styles.cell,
-                { width: cellWidth, backgroundColor: hasSounds ? color : '#111827' },
+                { width: cellWidth, backgroundColor: hasSounds ? color : '#15213a' },
                 isActiveBeat ? styles.activeCell : null,
               ]}
             >
@@ -375,6 +410,7 @@ export function FragmentPlayback({ fragment }: FragmentPlaybackProps) {
                   <Ionicons name="layers" size={12} color="#e2e8f0" />
                 </View>
               ) : null}
+              {isActiveBeat ? <View style={styles.activeOverlay} /> : null}
             </View>
           );
         })}
@@ -393,7 +429,7 @@ const styles = StyleSheet.create({
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   controlButton: {
     width: 40,
@@ -402,16 +438,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#38bdf8',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
   controlButtonActive: {
     backgroundColor: '#0ea5e9',
   },
   controlButtonDisabled: {
     opacity: 0.7,
-  },
-  bpmLabel: {
-    color: '#cbd5f5',
-    fontWeight: '600',
   },
   grid: {
     width: '100%',
@@ -424,17 +457,27 @@ const styles = StyleSheet.create({
   cell: {
     aspectRatio: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#0f172a',
+    borderColor: '#1e293b',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   activeCell: {
-    borderColor: '#38bdf8',
-    borderWidth: 2,
+    shadowColor: '#38bdf8',
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 6,
   },
   layersBadge: {
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
     borderRadius: 8,
     padding: 2,
+  },
+  activeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#38bdf8',
+    pointerEvents: 'none',
   },
 });
