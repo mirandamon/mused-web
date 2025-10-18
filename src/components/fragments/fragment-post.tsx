@@ -3,11 +3,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Heart, MessageCircle, GitFork, Play, Pause, Layers, Volume2, VolumeX } from 'lucide-react';
+import { Heart, MessageCircle, GitFork, Play, Pause, Layers, Volume2, VolumeX, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Fragment, Pad, PadSound, Comment } from '@/lib/types';
 import { formatDistanceToNow } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +29,10 @@ const isBrowser = typeof window !== 'undefined';
 let globalAudioContext: AudioContext | null = null;
 let globalGainNode: GainNode | null = null;
 let isGlobalAudioContextInitialized = false;
+
+const PADS_PER_PAGE = 16;
+
+type PlaceholderPad = { placeholder: true; id: string };
 
 const initializeGlobalAudioContext = () => {
     if (isBrowser && !isGlobalAudioContextInitialized) {
@@ -55,6 +59,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
   const [likeCount, setLikeCount] = useState(initialFragment.likes || 0);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
   const [isMuted, setIsMuted] = useState(isBrowser && globalGainNode ? globalGainNode.gain.value < 0.1 : false);
+  const [currentPadPage, setCurrentPadPage] = useState(0);
 
   const playbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
@@ -67,6 +72,76 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
      // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
+  const defaultEmptyPadGrid = useMemo<Pad[]>(
+    () =>
+      Array.from({ length: PADS_PER_PAGE }, (_, i) => ({
+        id: i,
+        sounds: [] as PadSound[],
+        isActive: false,
+        currentSoundIndex: 0,
+      })),
+    []
+  );
+
+  const sortedPads = useMemo<Pad[]>(() => [...fragment.pads].sort((a, b) => a.id - b.id), [fragment.pads]);
+  const actualPadCount = sortedPads.length;
+  const padSource = actualPadCount > 0 ? sortedPads : defaultEmptyPadGrid;
+  const totalPadCount = actualPadCount > 0 ? actualPadCount : defaultEmptyPadGrid.length;
+
+  const totalPadPages = useMemo(
+    () => Math.max(1, Math.ceil(totalPadCount / PADS_PER_PAGE)),
+    [totalPadCount]
+  );
+
+  const displayedPads = useMemo<(Pad | PlaceholderPad)[]>(() => {
+    const startIndex = currentPadPage * PADS_PER_PAGE;
+    const slice = padSource.slice(startIndex, startIndex + PADS_PER_PAGE);
+
+    if (slice.length === PADS_PER_PAGE) {
+      return slice;
+    }
+
+    return [
+      ...slice,
+      ...Array.from({ length: PADS_PER_PAGE - slice.length }, (_, idx) => ({
+        placeholder: true,
+        id: `placeholder-${startIndex + slice.length + idx}`,
+      })),
+    ];
+  }, [padSource, currentPadPage]);
+
+  useEffect(() => {
+    setCurrentPadPage((prev) => {
+      const maxPageIndex = Math.max(0, totalPadPages - 1);
+      return prev > maxPageIndex ? maxPageIndex : prev;
+    });
+  }, [totalPadPages]);
+
+  useEffect(() => {
+    if (!isPlaying || currentBeat === null) {
+      return;
+    }
+
+    const beatIndex = sortedPads.findIndex((pad) => pad.id === currentBeat);
+    if (beatIndex === -1) {
+      return;
+    }
+
+    const beatPage = Math.floor(beatIndex / PADS_PER_PAGE);
+    setCurrentPadPage((prev) => (prev === beatPage ? prev : beatPage));
+  }, [currentBeat, isPlaying, sortedPads]);
+
+  const goToPreviousPadPage = () => {
+    setCurrentPadPage((prev) => Math.max(0, prev - 1));
+  };
+
+  const goToNextPadPage = () => {
+    setCurrentPadPage((prev) => Math.min(totalPadPages - 1, prev + 1));
+  };
+
+  const pageRangeStart = totalPadCount === 0 ? 0 : currentPadPage * PADS_PER_PAGE + 1;
+  const pageRangeEnd = totalPadCount === 0 ? 0 : Math.min((currentPadPage + 1) * PADS_PER_PAGE, totalPadCount);
 
    const loadAudio = useCallback(async (httpUrl: string): Promise<AudioBuffer | null> => {
        if (!isBrowser || !globalAudioContext) {
@@ -228,7 +303,7 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
           console.error("Post startPlayback: Audio context not initialized.");
           return;
       }
-      if (!fragment || !fragment.pads || fragment.pads.length === 0) {
+      if (!fragment || sortedPads.length === 0) {
           console.warn(`Post ${fragment?.id}: No pads to play.`);
           return;
       }
@@ -240,18 +315,26 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
             clearInterval(playbackIntervalRef.current);
           }
           setIsPlaying(true);
-          setCurrentBeat(0); // Start from the first beat (pad index 0)
 
           const bpm = fragment?.bpm || 120;
           const beatDuration = (60 / bpm) * 1000;
           console.log(`Post ${fragment.id}: BPM ${bpm}, Beat Duration ${beatDuration}ms.`);
 
-          const playBeatSounds = (beatIndex: number) => { // beatIndex is the pad.id (0-15)
-              const padToPlay = fragment.pads.find(p => p.id === beatIndex); // Find pad by its ID
+          const totalPadsInSequence = sortedPads.length;
+          let beatIndex = 0;
 
-              // For feed playback, play if the pad has sounds
-              if (padToPlay && padToPlay.sounds && padToPlay.sounds.length > 0) {
-                  console.log(`Post ${fragment.id}: Playing Beat/Pad ID ${beatIndex}, Sounds: ${padToPlay.sounds.length}`);
+          const triggerBeat = (index: number) => {
+              const padToPlay = sortedPads[index];
+
+              if (!padToPlay) {
+                setCurrentBeat(null);
+                return;
+              }
+
+              setCurrentBeat(padToPlay.id);
+
+              if (padToPlay.sounds && padToPlay.sounds.length > 0) {
+                  console.log(`Post ${fragment.id}: Playing Beat/Pad ID ${padToPlay.id}, Sounds: ${padToPlay.sounds.length}`);
                   padToPlay.sounds.forEach(soundToPlay => {
                       const urlToUse = soundToPlay?.downloadUrl;
                       if (urlToUse && urlToUse.startsWith('http')) {
@@ -269,32 +352,25 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                               });
                           }
                       } else {
-                          console.warn(`Post ${fragment.id}: Playback Beat/Pad ID ${beatIndex}, Sound ${soundToPlay?.soundName} - No valid HTTP download URL. Original: ${soundToPlay?.soundUrl}, Download: ${soundToPlay?.downloadUrl}`);
+                          console.warn(`Post ${fragment.id}: Playback Beat/Pad ID ${padToPlay.id}, Sound ${soundToPlay?.soundName}- No valid HTTP download URL. Original: ${soundToPlay?.soundUrl}, Download: ${soundToPlay?.downloadUrl}`);
                       }
                   });
-              } else {
-                   // console.log(`Post ${fragment.id}: Skipping Beat/Pad ID ${beatIndex} - Pad ${padToPlay?.id} has no sounds or was not found.`);
               }
           };
 
-          playBeatSounds(0); // Play sounds for the first beat (pad ID 0) immediately
+          triggerBeat(beatIndex);
 
           playbackIntervalRef.current = setInterval(() => {
-            setCurrentBeat(prevBeat => {
-              const nextBeatRaw = (prevBeat !== null ? prevBeat + 1 : 0);
-              const totalPadsInGrid = (fragment.rows || 4) * (fragment.columns || 4);
-              const nextBeatId = nextBeatRaw % totalPadsInGrid;
+            if (totalPadsInSequence === 0) {
+              return;
+            }
 
-              if (nextBeatRaw >= totalPadsInGrid && totalPadsInGrid > 0) {
-                  // console.log(`Post ${fragment.id}: Playback loop finished, restarting from beat 0.`);
-              }
-              playBeatSounds(nextBeatId); // Pass the pad ID
-              return nextBeatId; // This is the ID of the pad to be highlighted next
-            });
+            beatIndex = (beatIndex + 1) % totalPadsInSequence;
+            triggerBeat(beatIndex);
           }, beatDuration);
           console.log(`Post ${fragment.id}: Playback interval set.`);
       }).catch(e => console.error(`Post ${fragment.id}: Error resuming audio context for playback:`, e));
-  }, [fragment, playSound, loadAudio, stopPlayback]);
+  }, [fragment, playSound, loadAudio, stopPlayback, sortedPads]);
 
   const handlePlayPause = () => {
      console.log(`Post ${fragment.id}: handlePlayPause called. isPlaying: ${isPlaying}`);
@@ -376,10 +452,51 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
            </Tooltip>
         </CardHeader>
 
-        <CardContent className="p-0 aspect-square bg-secondary/30 flex items-center justify-center">
-           {/* Ensure fragment.pads is available before mapping */}
-           <div className={`grid grid-cols-${fragment.columns || 4} gap-1 p-4 w-full h-full max-w-[200px] max-h-[200px] mx-auto`}>
-             {(fragment.pads && fragment.pads.length > 0 ? fragment.pads : Array.from({ length: (fragment.rows || 4) * (fragment.columns || 4) }, (_, i) => ({ id: i, sounds: [], isActive: initialFragment?.pads?.find(p=>p.id===i)?.isActive || false, currentSoundIndex: 0 }))).map(pad => {
+        <CardContent className="relative p-4 bg-secondary/30">
+          <div className="absolute top-4 left-4 rounded-full bg-background/70 px-2 py-1 text-xs font-medium text-muted-foreground shadow-sm">
+            {totalPadCount > 0
+              ? `Pads ${pageRangeStart}-${pageRangeEnd} of ${totalPadCount}`
+              : 'No pads available'}
+          </div>
+          {totalPadPages > 1 && (
+            <div className="absolute top-4 right-4 flex items-center gap-1 rounded-full bg-background/70 px-2 py-1 shadow-sm">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={goToPreviousPadPage}
+                disabled={currentPadPage === 0}
+                aria-label="Show previous pads"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-[10px] font-semibold tabular-nums">{currentPadPage + 1} / {totalPadPages}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={goToNextPadPage}
+                disabled={currentPadPage >= totalPadPages - 1}
+                aria-label="Show next pads"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+          <div className="aspect-square w-full">
+            <div className="grid h-full w-full grid-cols-4 grid-rows-4 gap-2 sm:gap-3">
+              {displayedPads.map((padLike) => {
+                if ('placeholder' in padLike) {
+                  return (
+                    <div
+                      key={padLike.id}
+                      className="rounded-lg border-2 border-dashed border-muted-foreground/40 bg-background/40"
+                      aria-hidden="true"
+                    />
+                  );
+                }
+
+                const pad = padLike;
                 const hasSounds = pad.sounds && pad.sounds.length > 0;
                 const currentSoundIndex = pad.currentSoundIndex ?? 0;
                 const currentSound: PadSound | undefined = hasSounds ? pad.sounds?.[currentSoundIndex] : undefined;
@@ -391,54 +508,62 @@ export default function FragmentPost({ fragment: initialFragment }: FragmentPost
                     ? 'bg-gradient-to-br from-primary/30 to-secondary/30'
                     : 'bg-muted/40';
 
-                // A pad is highlighted if it's the current beat, regardless of having sounds.
                 const isCurrentPlayingBeat = isPlaying && currentBeat === pad.id;
-                const shouldHighlight = isCurrentPlayingBeat; // Simplified highlight condition
+                const shouldHighlight = isCurrentPlayingBeat;
 
-               return (
-                 <Tooltip key={pad.id} delayDuration={200}>
+                return (
+                  <Tooltip key={pad.id} delayDuration={200}>
                     <TooltipTrigger asChild>
-                        <div
-                            className={cn(
-                            "relative w-full h-full rounded transition-all duration-100 border border-transparent",
-                            bgColorClass,
-                            shouldHighlight ? 'ring-2 ring-offset-1 ring-accent scale-[1.08] shadow-md border-accent/50' : '',
-                            // Subtle border if has sounds but not current beat, OR if no sounds and not current beat
-                            (hasSounds && !shouldHighlight) || (!hasSounds && !shouldHighlight) ? 'border-background/10' : '',
-                            hasSounds && pad.sounds && pad.sounds.length > 1 && "flex items-center justify-center" // For multi-sound icon
-                            )}
-                        >
-                            {/* Show layers icon if multiple sounds and pad has sounds */}
-                            {hasSounds && pad.sounds && pad.sounds.length > 1 && <Layers className="w-1/2 h-1/2 text-white/50 absolute" />}
-                            {hasSounds && pad.sounds && pad.sounds.length > 1 && <div className="absolute inset-0 bg-black/10 rounded"></div>}
-                            {/* If single sound or no sound, div is just colored */}
-                        </div>
+                      <div
+                        className={cn(
+                          'relative h-full w-full rounded border border-transparent transition-all duration-100',
+                          bgColorClass,
+                          shouldHighlight ? 'ring-2 ring-offset-1 ring-accent scale-[1.08] shadow-md border-accent/50' : '',
+                          (hasSounds && !shouldHighlight) || (!hasSounds && !shouldHighlight)
+                            ? 'border-background/10'
+                            : '',
+                          hasSounds && pad.sounds && pad.sounds.length > 1 && 'flex items-center justify-center'
+                        )}
+                      >
+                        {hasSounds && pad.sounds && pad.sounds.length > 1 && (
+                          <>
+                            <Layers className="absolute h-1/2 w-1/2 text-white/50" />
+                            <div className="absolute inset-0 rounded bg-black/10" />
+                          </>
+                        )}
+                      </div>
                     </TooltipTrigger>
-                     {hasSounds && ( // Only show tooltip if pad has sounds
-                        <TooltipContent side="top" className="bg-background text-foreground text-xs p-2 max-w-[150px]">
-                            {pad.sounds?.length === 1 && currentSound ? (
-                                <p>{currentSound.soundName}</p>
-                            ) : pad.sounds && pad.sounds.length > 1 && currentSound ? (
-                                <>
-                                <ul className="list-none p-0 m-0 space-y-1">
-                                {pad.sounds.map((s, idx) => (
-                                    <li key={s.soundId} className={cn("flex items-center", idx === currentSoundIndex ? "font-semibold" : "")}>
-                                        <div className={`w-3 h-3 rounded-sm mr-2 shrink-0 ${s.color || 'bg-muted'}`}></div>
-                                        <span className="truncate">{s.soundName}</span>
-                                    </li>
-                                ))}
-                                </ul>
-                                 <p className="text-xs text-muted-foreground mt-1 pt-1 border-t border-border/50">Current: {currentSound?.soundName}</p>
-                                </>
-                            ) : (
-                              <p className="text-muted-foreground italic">Pad has sounds</p> // Fallback if currentSound is somehow undefined
-                            )}
-                        </TooltipContent>
+                    {hasSounds && (
+                      <TooltipContent side="top" className="max-w-[150px] bg-background p-2 text-xs text-foreground">
+                        {pad.sounds?.length === 1 && currentSound ? (
+                          <p>{currentSound.soundName}</p>
+                        ) : pad.sounds && pad.sounds.length > 1 && currentSound ? (
+                          <>
+                            <ul className="m-0 space-y-1 p-0">
+                              {pad.sounds.map((s, idx) => (
+                                <li
+                                  key={s.soundId}
+                                  className={cn('flex items-center', idx === currentSoundIndex ? 'font-semibold' : '')}
+                                >
+                                  <div className={`mr-2 h-3 w-3 shrink-0 rounded-sm ${s.color || 'bg-muted'}`}></div>
+                                  <span className="truncate">{s.soundName}</span>
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="mt-1 border-t border-border/50 pt-1 text-xs text-muted-foreground">
+                              Current: {currentSound?.soundName}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="italic text-muted-foreground">Pad has sounds</p>
+                        )}
+                      </TooltipContent>
                     )}
-                 </Tooltip>
-               );
-             })}
-           </div>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
         </CardContent>
 
         <CardFooter className="flex flex-col items-start p-4 space-y-3">

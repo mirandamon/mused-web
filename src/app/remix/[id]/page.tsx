@@ -181,7 +181,7 @@ export default function RemixFragmentPage() {
         <h1 className="text-3xl font-bold mb-8">Remixing Fragment...</h1>
         <div className="flex flex-col items-center space-y-4 w-full max-w-md">
            <Skeleton className="h-8 w-3/4 mb-4" />
-           <div className="grid grid-cols-4 gap-2 w-full aspect-square">
+           <div className="grid grid-cols-4 grid-rows-4 gap-2 sm:gap-3 w-full aspect-square">
             {Array.from({ length: 16 }).map((_, i) => (
               <Skeleton key={i} className="w-full h-full rounded-lg bg-muted" />
             ))}
